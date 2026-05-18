@@ -1,7 +1,7 @@
 pipeline {
     parameters {
         string(name: 'BUILD_CONTAINER_IMAGE', defaultValue: 'mcr.microsoft.com/dotnet/sdk:10.0', description: 'Image for the build container')
-        string(name: 'BUILD_CONTAINER_ARGS', defaultValue: '-v /tmp/nuget:/tmp/nuget -e DOTNET_CLI_TELEMETRY_OPTOUT=1 --net=cicd-net', description: 'Arguments for the build container')
+        string(name: 'BUILD_CONTAINER_ARGS', defaultValue: '-v /tmp/nuget:/tmp/nuget -e DOTNET_CLI_TELEMETRY_OPTOUT=1 --net=cicd-net -v /var/run/docker.sock:/var/run/docker.sock --group-add 999', description: 'Arguments for the build container')
         string(name: 'BUILD_FILE', defaultValue: 'cicd.sln', description: 'File to build (sln or csproj)')
         string(name: 'PACK_VER', defaultValue: '0.0.1', description: 'Explicit version for package')
         string(name: 'WEBAPPHOST_CONTAINER_NAME', defaultValue: 'webapphost-njg', description: 'Name for the local web app host container')
@@ -11,7 +11,7 @@ pipeline {
     agent {
         docker {
             image "${params.BUILD_CONTAINER_IMAGE}"
-            args "${BUILD_CONTAINER_ARGS}"
+            args "${BUILD_CONTAINER_ARGS}" '-v /var/run/docker.sock:/var/run/docker.sock --group-add 999'
         }
     }
     stages {
