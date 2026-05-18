@@ -6,14 +6,18 @@ pipeline {
         string(name: 'PACK_VER', defaultValue: '0.0.1', description: 'Explicit version for package')
         string(name: 'WEBAPPHOST_CONTAINER_NAME', defaultValue: 'webapphost-njg', description: 'Name for the local web app host container')
         string(name: 'GCP_REGION', defaultValue: 'us-west1', description: 'GCP region for artifact registry')
+        string(name: 'GAR_REGION', defaultValue: 'us-west1', description: 'GAR region for artifact registry')
         string(name: 'GCP_REPOSITORY_NAME', defaultValue: 'egen-cicd-net', description: 'GCP artifact repository name')
         string(name: 'GCP_APPHOST_CONTAINER_NAME', defaultValue: 'web-apphost', description: 'Name for the web app host container in GAR')
         string(name: 'GCP_PROJECT_ID', defaultValue: 'egen-gcr', description: 'GCP project ID')
+        string(name: 'GAR_SERVICE_ACCOUNT_ID', defaultValue: 'gar-service-account', description: 'Gar service account name')
+        string(name: 'GAR_SERVICE_ACCOUNT_ID', defaultValue: 'gar-service-account', description: 'Gar service account name')
     }
     agent {
         docker {
             image "${params.BUILD_CONTAINER_IMAGE}"
             args "${BUILD_CONTAINER_ARGS}" 
+            reuseNode true
         }
     }
     stages {
@@ -57,7 +61,14 @@ pipeline {
 
         stage('Push to GAR') {
             steps {
-                sh "docker push ${params.GCP_REGION}-docker.pkg.dev/${params.GCP_PROJECT_ID}/${params.GCP_REPOSITORY_NAME}/${params.GCP_APPHOST_CONTAINER_NAME}:v1"
+                withCredentials([file(credentialsId: '${params.GAR_SERVICE_ACCOUNT_ID}', variable: 'GOOGLE_APPLICATION_CREDENTIALS')]) {
+                    sh '''
+                        cat "$GOOGLE_APPLICATION_CREDENTIALS" | \
+                          docker login -u _json_key --password-stdin \
+                          https://${GAR_LOCATION}-docker.pkg.dev
+                       docker push ${params.GCP_REGION}-docker.pkg.dev/${params.GCP_PROJECT_ID}/${params.GCP_REPOSITORY_NAME}/${params.GCP_APPHOST_CONTAINER_NAME}:v1
+                    '''
+                }
             }
         }
     }
