@@ -1,45 +1,38 @@
-# syntax=docker/dockerfile:1.7
-# Build from this directory:
-#   docker build -f Dockerfile -t web.apphost ..
-# Or from the repo root:
-#   docker build -f src/Web.AppHost/Dockerfile -t web.apphost src
+# See https://aka.ms/customizecontainer to learn how to customize your debug container and how Visual Studio uses this Dockerfile to build your images for faster debugging.
 
-ARG DOTNET_VERSION=10.0
-
-FROM mcr.microsoft.com/dotnet/sdk:${DOTNET_VERSION} AS build
-WORKDIR /src
-
-COPY Web.AppHost/Web.AppHost.csproj                                 Web.AppHost/
-COPY Model.Weather/Model.Weather.csproj                             Model.Weather/
-COPY Web.Components.Weather/Web.Components.Weather.csproj           Web.Components.Weather/
-COPY Web.Shared/Web.Shared.csproj                                   Web.Shared/
-COPY Web.Shared.Assets/Web.Shared.Assets.csproj                     Web.Shared.Assets/
-COPY Web.Shared.Components/Web.Shared.Components.csproj             Web.Shared.Components/
-COPY Web.Shared.Components.Layout/Web.Shared.Components.Layout.csproj Web.Shared.Components.Layout/
-COPY Web.Shared.Components.Pages/Web.Shared.Components.Pages.csproj Web.Shared.Components.Pages/
-
-RUN dotnet restore Web.AppHost/Web.AppHost.csproj
-
-COPY . .
-RUN dotnet publish Web.AppHost/Web.AppHost.csproj \
-    -c Release \
-    -o /app/publish \
-    --no-restore \
-    /p:UseAppHost=false
-
-FROM mcr.microsoft.com/dotnet/aspnet:${DOTNET_VERSION} AS runtime
+# This stage is used when running from VS in fast mode (Default for Debug configuration)
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS base
+USER $APP_UID
 WORKDIR /app
-
-ENV ASPNETCORE_HTTP_PORTS=8080 \
-    ASPNETCORE_ENVIRONMENT=Production \
-    DOTNET_RUNNING_IN_CONTAINER=true
-
-COPY --from=build /app/publish ./
-
-USER app
 EXPOSE 8080
+EXPOSE 8081
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD wget --quiet --spider --tries=1 http://localhost:8080/ || exit 1
 
+# This stage is used to build the service project
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+ARG BUILD_CONFIGURATION=Release
+WORKDIR /src
+COPY ["src/Web.AppHost/Web.AppHost.csproj", "src/Web.AppHost/"]
+COPY ["src/Aspire/Aspire.ServiceDefaults/Aspire.ServiceDefaults.csproj", "src/Aspire/Aspire.ServiceDefaults/"]
+COPY ["src/Model.Weather/Model.Weather.csproj", "src/Model.Weather/"]
+COPY ["src/Web.Components.Weather/Web.Components.Weather.csproj", "src/Web.Components.Weather/"]
+COPY ["src/Web.Shared.Components.Layout/Web.Shared.Components.Layout.csproj", "src/Web.Shared.Components.Layout/"]
+COPY ["src/Web.Shared.Components.Pages/Web.Shared.Components.Pages.csproj", "src/Web.Shared.Components.Pages/"]
+COPY ["src/Web.Shared/Web.Shared.csproj", "src/Web.Shared/"]
+COPY ["src/Web.Shared.Assets/Web.Shared.Assets.csproj", "src/Web.Shared.Assets/"]
+COPY ["src/Web.Shared.Components/Web.Shared.Components.csproj", "src/Web.Shared.Components/"]
+RUN dotnet restore "./src/Web.AppHost/Web.AppHost.csproj"
+COPY . .
+WORKDIR "/src/src/Web.AppHost"
+RUN dotnet build "./Web.AppHost.csproj" -c $BUILD_CONFIGURATION -o /app/build
+
+# This stage is used to publish the service project to be copied to the final stage
+FROM build AS publish
+ARG BUILD_CONFIGURATION=Release
+RUN dotnet publish "./Web.AppHost.csproj" -c $BUILD_CONFIGURATION -o /app/publish /p:UseAppHost=false
+
+# This stage is used in production or when running from VS in regular mode (Default when not using the Debug configuration)
+FROM base AS final
+WORKDIR /app
+COPY --from=publish /app/publish .
 ENTRYPOINT ["dotnet", "Web.AppHost.dll"]
