@@ -1,0 +1,10 @@
+FROM mcr.microsoft.com/dotnet/sdk:10.0
+
+ARG DOCKER_GID=999
+RUN groupadd -g ${DOCKER_GID} docker \
+ && usermod -aG docker app
+
+# Install docker CLI (not the daemon)
+RUN apt-get update && apt-get install -y docker.io && rm -rf /var/lib/apt/lists/*
+
+USER app
