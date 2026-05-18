@@ -60,15 +60,15 @@ pipeline {
 
         stage('Push to GAR') {
             steps {
-                withCredentials([file(credentialsId: 'gar-service-account', variable: 'GOOGLE_APPLICATION_CREDENTIALS')]) {
+                withCredentials([file(credentialsId: '${GAR_SERVICE_ACCOUNT_ID}', variable: 'GOOGLE_APPLICATION_CREDENTIALS')]) {
                     println "1"
                     println "${GOOGLE_APPLICATION_CREDENTIALS}"
                     println "${params.GAR_REGION}"
                     println "2"
-                    sh '''
+                    sh """
                         cat "$GOOGLE_APPLICATION_CREDENTIALS" | docker login -u _json_key --password-stdin https://${params.GAR_REGION}-docker.pkg.dev
                         docker push "${params.GAR_REGION}-docker.pkg.dev/${params.GCP_PROJECT_ID}/${params.GCP_REPOSITORY_NAME}/${params.GCP_APPHOST_CONTAINER_NAME}:v1"
-                    '''
+                    """
                 }
             }
         }
