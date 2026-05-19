@@ -116,10 +116,9 @@ pipeline {
                         gcloud auth list
                         echo "Authentication successful, ready to push to GAR"
                     """
-                }
-
-                script {
-                GCP_AUTHENTICATED = true
+                    script {
+                        GCP_AUTHENTICATED = true
+                    }
                 }
             }
         }
