@@ -115,8 +115,9 @@ pipeline {
 
                             gcloud auth activate-service-account --key-file="$GCP_KEY_FILE"
                             echo "2"
-                            gcloud config set project \${params.GCP_PROJECT_ID}
+                            gcloud config set project ${params.GCP_PROJECT_ID}
                             echo "3"
+                            gcloud auth configure-docker ${params.GCP_REGION}-docker.pkg.dev --quiet
                             echo "4"
                             gcloud auth list
 
