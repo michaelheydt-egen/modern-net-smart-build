@@ -119,10 +119,11 @@ pipeline {
         stage('Verify Deployment') {
             steps {
                 sh """
-                    SERVICE_URL=$(gcloud run services describe ${GCR_APPHOST_SERVICE} \
-                        --region=${GCP_REGION} \
-                        --format="value(status.url)")
-                    echo "Deployed to: $SERVICE_URL"
+                    gcloud run services describe ${GCR_APPHOST_SERVICE}
+                    # SERVICE_URL=$(gcloud run services describe ${GCR_APPHOST_SERVICE} \
+                    #    --region=${GCP_REGION} \
+                    #    --format="value(status.url)")
+                    # echo "Deployed to: $SERVICE_URL"
                     
                     # Optional: smoke test
                     # curl -fsSL --max-time 30 "$SERVICE_URL/health" || echo "Health check skipped/failed"
