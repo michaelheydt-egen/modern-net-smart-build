@@ -126,7 +126,7 @@ pipeline {
             steps {
                 script {
                     sh """
-                        docker login -u _json_key --password-stdin https://${params.GAR_REGION}-docker.pkg.dev
+                        # docker login -u _json_key --password-stdin https://${params.GAR_REGION}-docker.pkg.dev
                         docker push "${params.GAR_REGION}-docker.pkg.dev/${params.GCP_PROJECT_ID}/${params.GAR_REPOSITORY_NAME}/${params.GAR_APPHOST_CONTAINER_NAME}:v1"
                     """
                 }
