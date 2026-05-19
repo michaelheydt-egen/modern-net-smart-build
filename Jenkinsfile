@@ -131,9 +131,11 @@ pipeline {
         }
         success {
             // echo "Build #${BUILD_NUMBER} deployed successfully as ${IMAGE_NAME}:${IMAGE_TAG}"
+            echo "Success"
         }
         failure {
             // echo "Build #${BUILD_NUMBER} failed at stage: ${env.STAGE_NAME}"
+            echo "Failure"
         }
     }
 }
