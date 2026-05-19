@@ -81,6 +81,7 @@ pipeline {
                     println "${cmd}"
                 }
                 sh """
+                    ${cmd}
                 """
             }
         }
