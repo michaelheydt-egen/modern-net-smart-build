@@ -39,8 +39,6 @@ pipeline {
 
                     GIT_COMMIT_HASH = sh (script: "git log -n 1 --pretty=format:'%H'", returnStdout: true)
                     println "Git commit hash: ${GIT_COMMIT_HASH}"
-
-                    // GCP_AUTHENTICATED = false
                 }
             }
         }
@@ -120,7 +118,9 @@ pipeline {
                     """
                 }
 
+                script {
                 GCP_AUTHENTICATED = true
+                }
             }
         }
 
