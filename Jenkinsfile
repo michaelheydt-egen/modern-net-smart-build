@@ -28,8 +28,8 @@ pipeline {
         stage('Init') {
             steps {
                 script {
-                    sh (script: sudo chown -R jenkins:jenkins /var/jenkins_home/workspace)
-                    
+                    sh (script: git config --global --add safe.directory '*')
+
                     println "Initializing build for ${params.BUILD_FILE}"
                     println "Using build container image: ${params.BUILD_CONTAINER_IMAGE}"
                     println "Build container arguments: ${params.BUILD_CONTAINER_ARGS}"
