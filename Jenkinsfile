@@ -50,21 +50,22 @@ pipeline {
                 }
             }
         }
-        stage('Clone') {
-            steps { 
-                sh 'rm -rf $"{params.REPO_DIR}"'
 
-                git url: "${params.GIT_URL}",
-                    branch: "${params.GIT_BRANCH}"
-            }
-        }
+        // stage('Clone') {
+        //     steps { 
+        //         sh 'rm -rf $"{params.REPO_DIR}"'
+
+        //         git url: "${params.GIT_URL}",
+        //             branch: "${params.GIT_BRANCH}"
+        //     }
+        // }
 
         stage('Restore') {
             steps { 
                 sh "dotnet restore ${params.BUILD_FILE}"
             }
         }
-        
+
         // stage('Build') {
         //     steps { 
         //         sh "dotnet build --no-restore ${params.BUILD_FILE}"
