@@ -76,6 +76,8 @@ pipeline {
             steps {
                 sh """
                     IMAGE="${params.GAR_REGION}-docker.pkg.dev/${params.GCP_PROJECT_ID}/${params.GAR_REPOSITORY_NAME}/${params.GAR_APPHOST_CONTAINER_NAME}:${params.GAR_APPHOST_VERSION}"
+                    echo "$IMAGE"
+                    gcloud run deploy ${params.GCR_APPHOST_SERVICE} --image=${IMAGE} --region=${params.GCR_REGION} --platform=managed --allow-unauthenticated --port=8080 --memory=512Mi --cpu=1 --min-instances=0 --max-instances=1
                 """
             }
         }
