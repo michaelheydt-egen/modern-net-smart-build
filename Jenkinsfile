@@ -111,6 +111,16 @@ pipeline {
                 withCredentials([file(credentialsId: 'gar-service-account', variable: 'GCP_KEY_FILE')]) {
                     script {
                         sh """
+                            echo "Authenticating to GCP with service account key from Jenkins credentials"
+
+                            gcloud auth activate-service-account --key-file="$GCP_KEY_FILE"
+                            echo "2"
+                            gcloud config set project \${params.GCP_PROJECT_ID}
+                            echo "3"
+                            gcloud auth configure-docker \${params.GCP_REGION}-docker.pkg.dev --quiet
+                            echo "4"
+                            gcloud auth list
+
                             echo "Authentication successful, ready to push to GAR"
                         """
 
