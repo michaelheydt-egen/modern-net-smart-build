@@ -103,23 +103,23 @@ pipeline {
             }
         }
 
-        stage('Deploy to Cloud Run') {
-            steps {
-                script {
-                    def runtimeSA = "${params.GCR_WEBAPPHOST_RUNTIME_SA}@${params.GCP_PROJECT_ID}.iam.gserviceaccount.com"
-                    def image = "${params.GAR_REGION}-docker.pkg.dev/${params.GCP_PROJECT_ID}/${params.GAR_REPOSITORY_NAME}/${params.GAR_APPHOST_CONTAINER_NAME}:${params.GAR_APPHOST_VERSION}"
-                    println "${image}"
-                    def cmd = "gcloud run deploy ${params.GCR_APPHOST_SERVICE} --image=${image} --project=${params.GCP_PROJECT_ID} --region=${params.GCR_REGION} --service-account=${runtimeSA} --platform=managed --allow-unauthenticated --port=8080 --memory=512Mi --cpu=1 --min-instances=0 --max-instances=1"
-                    println "${cmd}"
-                    sh "${cmd}"
-                }
-            }
-        }
+        // stage('Deploy to Cloud Run') {
+        //     steps {
+        //         script {
+        //             def runtimeSA = "${params.GCR_WEBAPPHOST_RUNTIME_SA}@${params.GCP_PROJECT_ID}.iam.gserviceaccount.com"
+        //             def image = "${params.GAR_REGION}-docker.pkg.dev/${params.GCP_PROJECT_ID}/${params.GAR_REPOSITORY_NAME}/${params.GAR_APPHOST_CONTAINER_NAME}:${params.GAR_APPHOST_VERSION}"
+        //             println "${image}"
+        //             def cmd = "gcloud run deploy ${params.GCR_APPHOST_SERVICE} --image=${image} --project=${params.GCP_PROJECT_ID} --region=${params.GCR_REGION} --service-account=${runtimeSA} --platform=managed --allow-unauthenticated --port=8080 --memory=512Mi --cpu=1 --min-instances=0 --max-instances=1"
+        //             println "${cmd}"
+        //             sh "${cmd}"
+        //         }
+        //     }
+        // }
 
         stage('Verify Deployment') {
             steps {
                 sh """
-                    gcloud run services describe ${GCR_APPHOST_SERVICE}
+                    gcloud run services describe ${GCR_APPHOST_SERVICE} --region=${GCR_REGION} --project=${GCP_PROJECT_ID} --format='value(status.url)'
                 """
             }
         }
