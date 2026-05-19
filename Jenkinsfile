@@ -95,37 +95,11 @@ pipeline {
             }
         }
 
-        // stage('Tag local docker image for GAR') {
-        //     steps {
-        //         sh "docker tag ${params.WEBAPPHOST_CONTAINER_NAME}:latest ${params.GCP_REGION}-docker.pkg.dev/${params.GCP_PROJECT_ID}/${params.GAR_REPOSITORY_NAME}/${params.GAR_APPHOST_CONTAINER_NAME}:v1"
-        //     }
-        // }
-
-        // stage('Push to GAR') {
-        //     steps {
-        //         withCredentials([file(credentialsId: "${params.GAR_SERVICE_ACCOUNT_ID}", variable: 'GOOGLE_APPLICATION_CREDENTIALS')]) {
-        //             sh """
-        //                 cat "$GOOGLE_APPLICATION_CREDENTIALS" | docker login -u _json_key --password-stdin https://${params.GAR_REGION}-docker.pkg.dev
-        //                 docker push "${params.GAR_REGION}-docker.pkg.dev/${params.GCP_PROJECT_ID}/${params.GAR_REPOSITORY_NAME}/${params.GAR_APPHOST_CONTAINER_NAME}:v1"
-        //             """
-        //         }
-        //     }
-        // }
-
-        // stage('Install gcloud') {
-        //     steps {
-        //         sh '''
-        //             apt-get update
-        //             apt-get install -y apt-transport-https ca-certificates gnupg curl
-        //             echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" \
-        //                 | tee /etc/apt/sources.list.d/google-cloud-sdk.list
-        //             curl https://packages.cloud.google.com/apt/doc/apt-key.gpg \
-        //                 | gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg
-        //             apt-get update
-        //             apt-get install -y google-cloud-cli
-        //         '''
-        //     }
-        // }
+        stage('Tag local docker image for GAR') {
+            steps {
+                sh "docker tag ${params.CONTAINER_NAME}:${CONTAINER_TAG} ${params.GCP_REGION}-docker.pkg.dev/${params.GCP_PROJECT_ID}/${params.GAR_REPOSITORY_NAME}/${params.GAR_APPHOST_CONTAINER_NAME}:v1"
+            }
+        }
 
         stage('Authenticate to GCP') {
             steps {
@@ -147,6 +121,32 @@ pipeline {
                 }
             }
         }
+
+        stage('Push to GAR') {
+            steps {
+                script {
+                    sh """
+                        cat "$GOOGLE_APPLICATION_CREDENTIALS" | docker login -u _json_key --password-stdin https://${params.GAR_REGION}-docker.pkg.dev
+                        docker push "${params.GAR_REGION}-docker.pkg.dev/${params.GCP_PROJECT_ID}/${params.GAR_REPOSITORY_NAME}/${params.GAR_APPHOST_CONTAINER_NAME}:v1"
+                    """
+                }
+            }
+        }
+
+        // stage('Install gcloud') {
+        //     steps {
+        //         sh '''
+        //             apt-get update
+        //             apt-get install -y apt-transport-https ca-certificates gnupg curl
+        //             echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" \
+        //                 | tee /etc/apt/sources.list.d/google-cloud-sdk.list
+        //             curl https://packages.cloud.google.com/apt/doc/apt-key.gpg \
+        //                 | gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg
+        //             apt-get update
+        //             apt-get install -y google-cloud-cli
+        //         '''
+        //     }
+        // }
 
         // stage('Deploy to Cloud Run') {
         //     steps {
