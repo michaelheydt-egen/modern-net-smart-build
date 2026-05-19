@@ -118,7 +118,7 @@ pipeline {
 
         stage('Verify Deployment') {
             steps {
-                stript {
+                script {
                     sh '''
                         SERVICE_URL=$(gcloud run services describe ${params.GCR_APPHOST_SERVICE} --region=${params.GCR_REGION} --project=${params.GCP_PROJECT_ID} --format='value(status.url)')
                         echo "Deployed to: $SERVICE_URL"
