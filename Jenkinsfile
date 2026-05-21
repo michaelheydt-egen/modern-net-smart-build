@@ -22,7 +22,7 @@ pipeline {
         string(name: 'GCR_SERVICE_ACCOUNT_ID', defaultValue: 'gcr-service-account', description: 'GCR service account name')
         string(name: 'GCR_WEBAPPHOST_RUNTIME_SA', defaultValue: 'webapphost-runtime', description: 'GCR web app host runtime service account name')
         string(name: 'NUGET_SOURCE', defaultValue: 'https://nexus.example.com/repository/nuget-hosted/', description: 'NuGet feed URL (Nexus hosted repo, internal proxy, or https://api.nuget.org/v3/index.json)')
-        string(name: 'NUGET_API_KEY_CREDENTIAL_ID', defaultValue: 'rhythm-nuget-api-key', description: 'Jenkins credential id (Secret Text) holding the NuGet API key for the target feed')
+        string(name: 'NUGET_API_KEY_CREDENTIAL_ID', defaultValue: 'rhythm-nuget', description: 'Jenkins credential id (Secret Text) holding the NuGet API key for the target feed')
         string(name: 'NEXUS_DOCKER_REGISTRY', defaultValue: 'nexus.example.com:8082', description: 'Nexus docker registry host:port (port determines the target hosted repo via the Nexus connector)')
         string(name: 'NEXUS_DOCKER_CREDENTIAL_ID', defaultValue: 'nexus-docker-credentials', description: 'Jenkins credential id (Username/Password) for the Nexus docker registry')
     }
@@ -30,6 +30,7 @@ pipeline {
     options {
         timestamps()
         timeout(time: 30, unit: 'MINUTES')
+        
         disableConcurrentBuilds()
     }
 
