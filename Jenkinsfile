@@ -23,10 +23,10 @@ pipeline {
         string(name: 'GCR_WEBAPPHOST_RUNTIME_SA', defaultValue: 'webapphost-runtime', description: 'GCR web app host runtime service account name')
         string(name: 'NUGET_SOURCE', defaultValue: 'http://nexus:8081/repository/nuget-hosted/', description: 'NuGet feed URL (Nexus hosted repo, internal proxy, or https://api.nuget.org/v3/index.json)')
         string(name: 'NUGET_API_KEY_CREDENTIAL_ID', defaultValue: 'rhythm-nuget', description: 'Jenkins credential id (Secret Text) holding the NuGet API key for the target feed')
-        string(name: 'NEXUS_DOCKER_HOST', defaultValue: 'nexus:8081', description: 'Nexus docker registry host:port (port determines the target hosted repo via the Nexus connector)')
+        string(name: 'NEXUS_DOCKER_HOST', defaultValue: 'nexus:8082', description: 'Nexus docker registry host:port (port determines the target hosted repo via the Nexus connector)')
         string(name: 'NEXUS_DOCKER_CREDENTIAL_ID', defaultValue: 'rhythm-docker', description: 'Jenkins credential id (Username/Password) for the Nexus docker registry')
         string(name: 'NEXUS_DOCKER_USER', defaultValue: 'admin', description: 'Nexus docker registray username (for Jenkins credentials)')
-        string(name: 'NEXUS_DOCKER_PROTOCOL', defaultValue: 'http://', description: 'Nexus communications protocol (http or https')
+        string(name: 'NEXUS_DOCKER_PROTOCOL', defaultValue: 'https://', description: 'Nexus communications protocol (http or https')
     }
     
     options {
