@@ -23,9 +23,10 @@ pipeline {
         string(name: 'GCR_WEBAPPHOST_RUNTIME_SA', defaultValue: 'webapphost-runtime', description: 'GCR web app host runtime service account name')
         string(name: 'NUGET_SOURCE', defaultValue: 'http://nexus:8081/repository/nuget-hosted/', description: 'NuGet feed URL (Nexus hosted repo, internal proxy, or https://api.nuget.org/v3/index.json)')
         string(name: 'NUGET_API_KEY_CREDENTIAL_ID', defaultValue: 'rhythm-nuget', description: 'Jenkins credential id (Secret Text) holding the NuGet API key for the target feed')
-        string(name: 'NEXUS_DOCKER_REGISTRY', defaultValue: 'http://nexus:8081', description: 'Nexus docker registry host:port (port determines the target hosted repo via the Nexus connector)')
+        string(name: 'NEXUS_DOCKER_HOST', defaultValue: 'nexus:8081', description: 'Nexus docker registry host:port (port determines the target hosted repo via the Nexus connector)')
         string(name: 'NEXUS_DOCKER_CREDENTIAL_ID', defaultValue: 'rhythm-docker', description: 'Jenkins credential id (Username/Password) for the Nexus docker registry')
         string(name: 'NEXUS_DOCKER_USER', defaultValue: 'admin', description: 'Nexus docker registray username (for Jenkins credentials)')
+        string(name: 'NEXUS_DOCKER_PROTOCOL', defaultValue: 'http://', description: 'Nexus communications protocol (http or https')
     }
     
     options {
@@ -133,14 +134,14 @@ pipeline {
                     script {
                         sh """
                             set -e
-                            echo "Tagging local image ${params.CONTAINER_NAME}:${CONTAINER_TAG} for Nexus registry ${params.NEXUS_DOCKER_REGISTRY}"
-                            docker tag ${params.CONTAINER_NAME}:${CONTAINER_TAG} ${params.NEXUS_DOCKER_REGISTRY}/${params.CONTAINER_NAME}:${CONTAINER_TAG}
+                            echo "Tagging local image ${params.CONTAINER_NAME}:${CONTAINER_TAG} for Nexus registry ${params.NEXUS_DOCKER_HOST}"
+                            docker tag ${params.CONTAINER_NAME}:${CONTAINER_TAG} ${params.NEXUS_DOCKER_HOST}/${params.CONTAINER_NAME}:${CONTAINER_TAG}
 
-                            echo "Logging in to Nexus docker registry ${params.NEXUS_DOCKER_REGISTRY}"
-                            echo "\$NEXUS_DOCKER_PASS" | docker login ${params.NEXUS_DOCKER_REGISTRY} -u "\$NEXUS_DOCKER_USER" --password-stdin
+                            echo "Logging in to Nexus docker registry ${params.NEXUS_DOCKER_HOST}"
+                            echo "\$NEXUS_DOCKER_PASS" | docker login ${NEXUS_DOCKER_PROTOCOL}${params.NEXUS_DOCKER_HOST} -u "\$NEXUS_DOCKER_USER" --password-stdin
 
-                            echo "Pushing image to Nexus registry ${params.NEXUS_DOCKER_REGISTRY}"
-                            docker push ${params.NEXUS_DOCKER_REGISTRY}/${params.CONTAINER_NAME}:${CONTAINER_TAG}
+                            echo "Pushing image to Nexus registry ${params.NEXUS_DOCKER_HOST}"
+                            docker push ${params.NEXUS_DOCKER_HOST}/${params.CONTAINER_NAME}:${CONTAINER_TAG}
                         """
                         NEXUS_DOCKER_AUTHENTICATED = true
                     }
