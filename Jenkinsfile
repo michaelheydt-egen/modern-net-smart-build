@@ -97,57 +97,85 @@ pipeline {
             }
         }
 
-        // stage('Publish Artifacts') {
+        stage('Publish Artifacts') {
+            steps {
+                withCredentials([string(credentialsId: "${params.NUGET_API_KEY_CREDENTIAL_ID}", variable: 'NUGET_API_KEY')]) {
+                    sh """
+                        set -e
+                        pkg_dir="${env.WORKSPACE}/nupkgs"
+                        ls -lsR "\$pkg_dir"
+                        echo "Publishing NuGet packages from \$pkg_dir to ${params.NUGET_SOURCE}"
+                        if ! ls "\$pkg_dir"/*.nupkg >/dev/null 2>&1; then
+                            echo "ERROR: No .nupkg files found in \$pkg_dir"
+                            exit 1
+                        fi
+                        for pkg in "\$pkg_dir"/*.nupkg; do
+                            echo "Pushing \$pkg"
+                            dotnet nuget push "\$pkg" \\
+                                --source "${params.NUGET_SOURCE}" \\
+                                --api-key "\$NUGET_API_KEY" \\
+                                --skip-duplicate \\
+                                --allow-insecure-connections 
+                        done
+                    """
+                }
+            }
+        }
+
+        stage('Create local docker image') {
+            steps {
+                sh "docker build --file ${params.DOCKER_BUILD_FILE} -t ${params.CONTAINER_NAME}:${CONTAINER_TAG} ."
+            }
+        }
+
+        // stage('Tag local docker image for GAR') {
         //     steps {
-        //         withCredentials([string(credentialsId: "${params.NUGET_API_KEY_CREDENTIAL_ID}", variable: 'NUGET_API_KEY')]) {
-        //             sh """
-        //                 set -e
-        //                 pkg_dir="${env.WORKSPACE}/nupkgs"
-        //                 ls -lsR "\$pkg_dir"
-        //                 echo "Publishing NuGet packages from \$pkg_dir to ${params.NUGET_SOURCE}"
-        //                 if ! ls "\$pkg_dir"/*.nupkg >/dev/null 2>&1; then
-        //                     echo "ERROR: No .nupkg files found in \$pkg_dir"
-        //                     exit 1
-        //                 fi
-        //                 for pkg in "\$pkg_dir"/*.nupkg; do
-        //                     echo "Pushing \$pkg"
-        //                     dotnet nuget push "\$pkg" \\
-        //                         --source "${params.NUGET_SOURCE}" \\
-        //                         --api-key "\$NUGET_API_KEY" \\
-        //                         --skip-duplicate \\
-        //                         --allow-insecure-connections 
-        //                 done
-        //             """
-        //         }
+        //         sh "docker tag ${params.CONTAINER_NAME}:${CONTAINER_TAG} ${params.GCP_REGION}-docker.pkg.dev/${params.GCP_PROJECT_ID}/${params.GAR_REPOSITORY_NAME}/${params.GAR_APPHOST_CONTAINER_NAME}:v1"
         //     }
         // }
 
-        // stage('Create local docker image') {
-        //     steps {
-        //         sh "docker build --file ${params.DOCKER_BUILD_FILE} -t ${params.CONTAINER_NAME}:${CONTAINER_TAG} ."
-        //     }
-        // }
+        stage('Push to Nexus') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: "${params.NEXUS_DOCKER_CREDENTIAL_ID}", usernameVariable: 'NEXUS_DOCKER_USER', passwordVariable: 'NEXUS_DOCKER_PASS')]) {
+                    script {
+                        sh """
+                            set -e
+                            echo "Tagging local image ${params.CONTAINER_NAME}:${CONTAINER_TAG} for Nexus registry ${params.NEXUS_DOCKER_HOST}"
+                            docker tag ${params.CONTAINER_NAME}:${CONTAINER_TAG} ${params.NEXUS_DOCKER_HOST}/${params.CONTAINER_NAME}:${CONTAINER_TAG}
 
-        // stage('Push to Nexus') {
-        //     steps {
-        //         withCredentials([usernamePassword(credentialsId: "${params.NEXUS_DOCKER_CREDENTIAL_ID}", usernameVariable: 'NEXUS_DOCKER_USER', passwordVariable: 'NEXUS_DOCKER_PASS')]) {
-        //             script {
-        //                 sh """
-        //                     set -e
-        //                     echo "Tagging local image ${params.CONTAINER_NAME}:${CONTAINER_TAG} for Nexus registry ${params.NEXUS_DOCKER_HOST}"
-        //                     docker tag ${params.CONTAINER_NAME}:${CONTAINER_TAG} ${params.NEXUS_DOCKER_HOST}/${params.CONTAINER_NAME}:${CONTAINER_TAG}
+                            echo "Logging in to Nexus docker registry ${params.NEXUS_DOCKER_HOST}"
+                            echo "\$NEXUS_DOCKER_PASS" | docker login ${NEXUS_DOCKER_PROTOCOL}${params.NEXUS_DOCKER_HOST} -u "\$NEXUS_DOCKER_USER" --password-stdin
 
-        //                     echo "Logging in to Nexus docker registry ${params.NEXUS_DOCKER_HOST}"
-        //                     echo "\$NEXUS_DOCKER_PASS" | docker login ${NEXUS_DOCKER_PROTOCOL}${params.NEXUS_DOCKER_HOST} -u "\$NEXUS_DOCKER_USER" --password-stdin
+                            echo "Pushing image to Nexus registry ${params.NEXUS_DOCKER_HOST}"
+                            docker push ${params.NEXUS_DOCKER_HOST}/${params.CONTAINER_NAME}:${CONTAINER_TAG}
+                        """
+                        NEXUS_DOCKER_AUTHENTICATED = true
+                    }
+                }
+            }
+        }
 
-        //                     echo "Pushing image to Nexus registry ${params.NEXUS_DOCKER_HOST}"
-        //                     docker push ${params.NEXUS_DOCKER_HOST}/${params.CONTAINER_NAME}:${CONTAINER_TAG}
-        //                 """
-        //                 NEXUS_DOCKER_AUTHENTICATED = true
-        //             }
-        //         }
-        //     }
-        // }
+        stage('Authenticate to GCP') {
+            steps {
+                withCredentials([file(credentialsId: 'gar-service-account', variable: 'GCP_KEY_FILE')]) {
+                    script {
+                        sh """
+                            echo "Authenticating to GCP with service account key from Jenkins credentials"
+
+                            gcloud auth activate-service-account --key-file="$GCP_KEY_FILE"
+                            gcloud config set project ${params.GCP_PROJECT_ID}
+                            gcloud auth configure-docker ${params.GCP_REGION}-docker.pkg.dev --quiet
+                            gcloud auth list
+
+                            echo "Authentication successful, ready to push to GAR"
+                        """
+
+                        GCP_AUTHENTICATED = true
+                    }
+                }
+            }
+        }
+
 
         stage('Push Nexus to GAR') {
             steps {
@@ -167,11 +195,6 @@ pipeline {
                             echo "Pulling ${nexusImage} from Nexus"
                             docker pull ${nexusImage}
 
-                            echo "Authenticating to GCP"
-                            gcloud auth activate-service-account --key-file="\$GCP_KEY_FILE"
-                            gcloud config set project ${params.GCP_PROJECT_ID}
-                            gcloud auth configure-docker ${params.GAR_REGION}-docker.pkg.dev --quiet
-
                             echo "Tagging ${nexusImage} as ${garImage}"
                             docker tag ${nexusImage} ${garImage}
 
@@ -185,34 +208,7 @@ pipeline {
             }
         }
 
-        // stage('Tag local docker image for GAR') {
-        //     steps {
-        //         sh "docker tag ${params.CONTAINER_NAME}:${CONTAINER_TAG} ${params.GCP_REGION}-docker.pkg.dev/${params.GCP_PROJECT_ID}/${params.GAR_REPOSITORY_NAME}/${params.GAR_APPHOST_CONTAINER_NAME}:v1"
-        //     }
-        // }
-
-        // stage('Authenticate to GCP') {
-        //     steps {
-        //         withCredentials([file(credentialsId: 'gar-service-account', variable: 'GCP_KEY_FILE')]) {
-        //             script {
-        //                 sh """
-        //                     echo "Authenticating to GCP with service account key from Jenkins credentials"
-
-        //                     gcloud auth activate-service-account --key-file="$GCP_KEY_FILE"
-        //                     gcloud config set project ${params.GCP_PROJECT_ID}
-        //                     gcloud auth configure-docker ${params.GCP_REGION}-docker.pkg.dev --quiet
-        //                     gcloud auth list
-
-        //                     echo "Authentication successful, ready to push to GAR"
-        //                 """
-
-        //                 GCP_AUTHENTICATED = true
-        //             }
-        //         }
-        //     }
-        // }
-
-        // stage('Push to GAR') {
+        // stage('Push Local to GAR') {
         //     steps {
         //         script {
         //             sh """
@@ -223,41 +219,41 @@ pipeline {
         //     }
         // }
 
-        // stage('Deploy to Cloud Run') {
-        //     steps {
-        //         script {
-        //             def runtimeSA = "${params.GCR_WEBAPPHOST_RUNTIME_SA}@${params.GCP_PROJECT_ID}.iam.gserviceaccount.com"
-        //             def image = "${params.GAR_REGION}-docker.pkg.dev/${params.GCP_PROJECT_ID}/${params.GAR_REPOSITORY_NAME}/${params.GAR_APPHOST_CONTAINER_NAME}:${params.GAR_APPHOST_VERSION}"
-        //             println "${image}"
-        //             def cmd = "gcloud run deploy ${params.GCR_APPHOST_SERVICE} --image=${image} --project=${params.GCP_PROJECT_ID} --region=${params.GCR_REGION} --service-account=${runtimeSA} --platform=managed --allow-unauthenticated --port=8080 --memory=512Mi --cpu=1 --min-instances=0 --max-instances=1"
-        //             println "${cmd}"
-        //             sh "${cmd}"
-        //         }
-        //     }
-        // }
+        stage('Deploy to Cloud Run') {
+            steps {
+                script {
+                    def runtimeSA = "${params.GCR_WEBAPPHOST_RUNTIME_SA}@${params.GCP_PROJECT_ID}.iam.gserviceaccount.com"
+                    def image = "${params.GAR_REGION}-docker.pkg.dev/${params.GCP_PROJECT_ID}/${params.GAR_REPOSITORY_NAME}/${params.GAR_APPHOST_CONTAINER_NAME}:${params.GAR_APPHOST_VERSION}"
+                    println "${image}"
+                    def cmd = "gcloud run deploy ${params.GCR_APPHOST_SERVICE} --image=${image} --project=${params.GCP_PROJECT_ID} --region=${params.GCR_REGION} --service-account=${runtimeSA} --platform=managed --allow-unauthenticated --port=8080 --memory=512Mi --cpu=1 --min-instances=0 --max-instances=1"
+                    println "${cmd}"
+                    sh "${cmd}"
+                }
+            }
+        }
 
-        // stage('Verify Deployment') {
-        //     steps {
-        //         script {
-        //             sh """
-        //                 SERVICE_URL=\$(gcloud run services describe ${params.GCR_APPHOST_SERVICE} --region=${params.GCR_REGION} --project=${params.GCP_PROJECT_ID} --format='value(status.url)')
-        //                 echo "Deployed to: \$SERVICE_URL"
-        //             """
-        //         }
-        //     }
-        // }
+        stage('Verify Deployment') {
+            steps {
+                script {
+                    sh """
+                        SERVICE_URL=\$(gcloud run services describe ${params.GCR_APPHOST_SERVICE} --region=${params.GCR_REGION} --project=${params.GCP_PROJECT_ID} --format='value(status.url)')
+                        echo "Deployed to: \$SERVICE_URL"
+                    """
+                }
+            }
+        }
 
-        // stage('Health Check') {
-        //     steps {
-        //         script {
-        //             sh """
-        //                 HEALTH_CHECK_URL=\$(gcloud run services describe ${params.GCR_APPHOST_SERVICE} --region=${params.GCR_REGION} --project=${params.GCP_PROJECT_ID} --format='value(status.url)')/alive
-        //                 echo \$HEALTH_CHECK_URL
-        //                 curl -fsSL --max-time 30 \$HEALTH_CHECK_URL || echo "Health check failed"
-        //             """
-        //         }
-        //     }
-        // }
+        stage('Health Check') {
+            steps {
+                script {
+                    sh """
+                        HEALTH_CHECK_URL=\$(gcloud run services describe ${params.GCR_APPHOST_SERVICE} --region=${params.GCR_REGION} --project=${params.GCP_PROJECT_ID} --format='value(status.url)')/alive
+                        echo \$HEALTH_CHECK_URL
+                        curl -fsSL --max-time 30 \$HEALTH_CHECK_URL || echo "Health check failed"
+                    """
+                }
+            }
+        }
     }
 
     post {

@@ -101,3 +101,4 @@ gcloud iam service-accounts delete $GCR_SA_EMAIL --quiet
 DEPLOYER_SA="jenkins-deployer@$PROJECT_ID.iam.gserviceaccount.com"
 RUNTIME_SA="webapphost-runtime@egen-gcr.iam.gserviceaccount.com"
 gcloud iam service-accounts get-iam-policy $RUNTIME_SA --format=json
+
