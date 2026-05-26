@@ -30,7 +30,7 @@ COPY ["src/app/Web.Shared.Components/Web.Shared.Components.csproj", "src/Web.Sha
 RUN ls ./src
 RUN dotnet restore "./src/Web.AppHost/Web.AppHost.csproj"
 COPY . .
-WORKDIR "/src/src/Web.AppHost"
+WORKDIR "/src/Web.AppHost"
 RUN dotnet build "./Web.AppHost.csproj" -c $BUILD_CONFIGURATION -o /app/build
 
 # This stage is used to publish the service project to be copied to the final stage
