@@ -8,7 +8,7 @@
       "args": [
         "run",
         "--project",
-        "${workspaceFolder}/src/Api.Web.Weather/Api.Web.Weather.csproj"
+        "${workspaceFolder}/src/app/Api.Web.Weather/Api.Web.Weather.csproj"
       ],
       "isBackground": true,
       "presentation": {
@@ -41,7 +41,7 @@
       "args": [
         "run",
         "--project",
-        "${workspaceFolder}/src/Web.AppHost/Web.AppHost.csproj"
+        "${workspaceFolder}/src/app/Web.AppHost/Web.AppHost.csproj"
       ],
       "isBackground": true,
       "presentation": {

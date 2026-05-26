@@ -2,10 +2,8 @@ pipeline {
     parameters {
         string(name: 'BUILD_CONTAINER_IMAGE', defaultValue: 'netsdk10:latest', description: 'Image for the build container')
         string(name: 'BUILD_CONTAINER_ARGS', defaultValue: '-v /tmp/nuget:/tmp/nuget -e DOTNET_CLI_TELEMETRY_OPTOUT=1 --net=cicd-net -u root -v /var/run/docker.sock:/var/run/docker.sock --group-add 0', description: 'Arguments for the build container')
-        string(name: 'BUILD_FILE', defaultValue: 'cicd.sln', description: 'File to build (sln or csproj)')
-        string(name: 'PACK_VER', defaultValue: '1.0.0', description: 'Explicit version for package')
-        string(name: 'NUGET_SOURCE', defaultValue: 'http://nexus:8081/repository/nuget-hosted/', description: 'NuGet feed URL (Nexus hosted repo, internal proxy, or https://api.nuget.org/v3/index.json)')
-        string(name: 'NUGET_API_KEY_CREDENTIAL_ID', defaultValue: 'rhythm-nuget', description: 'Jenkins credential id (Secret Text) holding the NuGet API key for the target feed')
+        string(name: 'BUILD_FILE', defaultValue: 'src/app/cicd.sln', description: 'File to build (sln or csproj)')
+        string(name: 'PACK_VER', defaultValue: '1.0.0', description: 'Base version (Major.Minor.Patch) used to derive PackageVersion / FileVersion / AssemblyVersion / InformationalVersion in build-info.json')
     }
 
     options {
@@ -37,6 +35,16 @@ pipeline {
                     GIT_COMMIT_SHORT = GIT_COMMIT_HASH.take(7)
                     println "Git commit hash: ${GIT_COMMIT_HASH}"
                     println "Git commit short: ${GIT_COMMIT_SHORT}"
+
+                    PACKAGE_VERSION  = "${params.PACK_VER}-ci.${env.BUILD_NUMBER}.g${GIT_COMMIT_SHORT}"
+                    FILE_VERSION     = "${params.PACK_VER}.${env.BUILD_NUMBER}"
+                    ASSEMBLY_VERSION = "${params.PACK_VER}.0"
+                    INFO_VERSION     = "${PACKAGE_VERSION}+${GIT_COMMIT_SHORT}"
+
+                    println "PackageVersion:  ${PACKAGE_VERSION}"
+                    println "AssemblyVersion: ${ASSEMBLY_VERSION}"
+                    println "FileVersion:     ${FILE_VERSION}"
+                    println "InfoVersion:     ${INFO_VERSION}"
                 }
             }
         }
@@ -60,55 +68,27 @@ pipeline {
             }
         }
 
-        stage ('Pack') {
+        stage ('Archive Build Info') {
             steps {
                 script {
-                    def packageVersion = "${params.PACK_VER}-ci.${env.BUILD_NUMBER}"
-                    def fileVersion    = "${params.PACK_VER}.${env.BUILD_NUMBER}"
-                    def assemblyVersion = "${params.PACK_VER}.0"
-                    def infoVersion    = "${packageVersion}+${GIT_COMMIT_SHORT}"
+                    writeJSON file: 'build-info.json', json: [
+                        packageVersion:       PACKAGE_VERSION,
+                        fileVersion:          FILE_VERSION,
+                        assemblyVersion:      ASSEMBLY_VERSION,
+                        informationalVersion: INFO_VERSION,
+                        gitCommitHash:        GIT_COMMIT_HASH,
+                        gitCommitShort:       GIT_COMMIT_SHORT,
+                        buildNumber:          env.BUILD_NUMBER,
+                        packVer:              params.PACK_VER,
+                        buildFile:            params.BUILD_FILE,
+                        buildTimestamp:       new Date().format("yyyy-MM-dd'T'HH:mm:ss'Z'", TimeZone.getTimeZone('UTC'))
+                    ], pretty: 2
 
-                    println "PackageVersion:  ${packageVersion}"
-                    println "AssemblyVersion: ${assemblyVersion}"
-                    println "FileVersion:     ${fileVersion}"
-                    println "InfoVersion:     ${infoVersion}"
+                    sh "cat build-info.json"
 
-                    sh """
-                        dotnet pack ${params.BUILD_FILE} \\
-                            -c Release \\
-                            /p:Version=${params.PACK_VER} \\
-                            /p:PackageVersion=${packageVersion} \\
-                            /p:AssemblyVersion=${assemblyVersion} \\
-                            /p:FileVersion=${fileVersion} \\
-                            /p:InformationalVersion="${infoVersion}" \\
-                            /p:PackageOutputPath=${env.WORKSPACE}/nupkgs
-                    """
-                    sh "ls -lsR ${env.WORKSPACE}/nupkgs"
-                }
-            }
-        }
+                    archiveArtifacts artifacts: 'build-info.json', fingerprint: true, onlyIfSuccessful: true
 
-        stage ('Publish Artifacts') {
-            steps {
-                withCredentials([string(credentialsId: "${params.NUGET_API_KEY_CREDENTIAL_ID}", variable: 'NUGET_API_KEY')]) {
-                    sh """
-                        set -e
-                        pkg_dir="${env.WORKSPACE}/nupkgs"
-                        ls -lsR "\$pkg_dir"
-                        echo "Publishing NuGet packages from \$pkg_dir to ${params.NUGET_SOURCE}"
-                        if ! ls "\$pkg_dir"/*.nupkg >/dev/null 2>&1; then
-                            echo "ERROR: No .nupkg files found in \$pkg_dir"
-                            exit 1
-                        fi
-                        for pkg in "\$pkg_dir"/*.nupkg; do
-                            echo "Pushing \$pkg"
-                            dotnet nuget push "\$pkg" \\
-                                --source "${params.NUGET_SOURCE}" \\
-                                --api-key "\$NUGET_API_KEY" \\
-                                --skip-duplicate \\
-                                --allow-insecure-connections
-                        done
-                    """
+                    currentBuild.description = "${PACKAGE_VERSION} (${GIT_COMMIT_SHORT})"
                 }
             }
         }
@@ -116,7 +96,7 @@ pipeline {
 
     post {
         success {
-            echo "Build #${BUILD_NUMBER} packaged and published successfully (PackageVersion ${params.PACK_VER}-ci.${BUILD_NUMBER})"
+            echo "Build #${BUILD_NUMBER} compiled successfully (PackageVersion ${PACKAGE_VERSION})"
         }
         failure {
             echo "Build #${BUILD_NUMBER} failed at stage: ${env.STAGE_NAME}"

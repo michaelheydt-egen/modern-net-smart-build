@@ -3,29 +3,29 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 18
 VisualStudioVersion = 18.7.11811.120
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Web.Shared.Assets", "src\Web.Shared.Assets\Web.Shared.Assets.csproj", "{FB97D843-CA4A-46D0-A74E-7DECA8F7636B}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Web.Shared.Assets", "Web.Shared.Assets\Web.Shared.Assets.csproj", "{FB97D843-CA4A-46D0-A74E-7DECA8F7636B}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Model.Weather", "src\Model.Weather\Model.Weather.csproj", "{851404AB-B498-40F2-A92B-562CD9541DA8}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Model.Weather", "Model.Weather\Model.Weather.csproj", "{851404AB-B498-40F2-A92B-562CD9541DA8}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Api.Web.Weather", "src\Api.Web.Weather\Api.Web.Weather.csproj", "{B199F880-39F1-45CA-8A1D-27FF17891703}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Api.Web.Weather", "Api.Web.Weather\Api.Web.Weather.csproj", "{B199F880-39F1-45CA-8A1D-27FF17891703}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Web.AppHost", "src\Web.AppHost\Web.AppHost.csproj", "{B60FE820-44BB-4172-B5B6-6A3B0727D595}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Web.AppHost", "Web.AppHost\Web.AppHost.csproj", "{B60FE820-44BB-4172-B5B6-6A3B0727D595}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Web.Shared.Components", "src\Web.Shared.Components\Web.Shared.Components.csproj", "{FF5B01AF-A859-C815-390E-317206D485B2}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Web.Shared.Components", "Web.Shared.Components\Web.Shared.Components.csproj", "{FF5B01AF-A859-C815-390E-317206D485B2}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Web.Shared", "src\Web.Shared\Web.Shared.csproj", "{D4AAA502-D0A6-9A3A-6BD9-F015023D0B91}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Web.Shared", "Web.Shared\Web.Shared.csproj", "{D4AAA502-D0A6-9A3A-6BD9-F015023D0B91}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Web.Components.Weather", "src\Web.Components.Weather\Web.Components.Weather.csproj", "{70DE0ED8-7469-4A64-8CF3-B74CD4571F48}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Web.Components.Weather", "Web.Components.Weather\Web.Components.Weather.csproj", "{70DE0ED8-7469-4A64-8CF3-B74CD4571F48}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Web.Shared.Components.Pages", "src\Web.Shared.Components.Pages\Web.Shared.Components.Pages.csproj", "{1DC16749-751A-48F3-862D-F066412AD03C}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Web.Shared.Components.Pages", "Web.Shared.Components.Pages\Web.Shared.Components.Pages.csproj", "{1DC16749-751A-48F3-862D-F066412AD03C}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Web.Shared.Components.Layout", "src\Web.Shared.Components.Layout\Web.Shared.Components.Layout.csproj", "{608EF444-DE99-4074-AF5C-72AD8AD6B01E}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Web.Shared.Components.Layout", "Web.Shared.Components.Layout\Web.Shared.Components.Layout.csproj", "{608EF444-DE99-4074-AF5C-72AD8AD6B01E}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{589C34A1-34A5-4320-A0FC-1A272F12EB11}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Aspire.AppHost", "src\Aspire\Aspire.AppHost\Aspire.AppHost.csproj", "{82AFC9AA-A7E7-4BAD-89B2-B0535F0DB769}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Aspire.AppHost", "Aspire\Aspire.AppHost\Aspire.AppHost.csproj", "{82AFC9AA-A7E7-4BAD-89B2-B0535F0DB769}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Aspire.ServiceDefaults", "src\Aspire\Aspire.ServiceDefaults\Aspire.ServiceDefaults.csproj", "{5458901B-FF03-A43E-32AA-55EBE75ED657}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Aspire.ServiceDefaults", "Aspire\Aspire.ServiceDefaults\Aspire.ServiceDefaults.csproj", "{5458901B-FF03-A43E-32AA-55EBE75ED657}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Hosts", "Hosts", "{ED1B428B-BF93-4BBE-A682-4741556158F5}"
 EndProject
@@ -37,15 +37,13 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Web", "Web", "{82D85888-941
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Model", "Model", "{C00FFD41-3D31-43FC-B29C-FC99C86697AC}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Aspire.Api.WeatherService", "Aspire.Api.WeatherService\Aspire.Api.WeatherService.csproj", "{0BD5EBA1-1444-44AD-9B4F-542E84A2FCC8}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Aspire.Api.WeatherService", "..\..\Aspire.Api.WeatherService\Aspire.Api.WeatherService.csproj", "{0BD5EBA1-1444-44AD-9B4F-542E84A2FCC8}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Api.Web.Weather.AppHost", "src\Api.Web.Weather.AppHost\Api.Web.Weather.AppHost.csproj", "{8BD51F6F-C2E2-4713-AC78-C8BB204C7169}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Api.Web.Weather.AppHost", "Api.Web.Weather.AppHost\Api.Web.Weather.AppHost.csproj", "{8BD51F6F-C2E2-4713-AC78-C8BB204C7169}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Shared", "Shared", "{38035FC9-C40E-4FF6-94B6-C1E9AB0B0DC7}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Weather", "Weather", "{08B3C368-DCAC-47B2-84DB-7F86490244FC}"
-EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "devops", "devops", "{FDC87BE0-0A7D-4BAB-8979-12675D67C9A7}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
