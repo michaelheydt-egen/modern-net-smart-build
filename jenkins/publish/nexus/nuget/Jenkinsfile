@@ -4,7 +4,7 @@ pipeline {
         string(name: 'BUILD_CONTAINER_ARGS', defaultValue: '-v /tmp/nuget:/tmp/nuget -e DOTNET_CLI_TELEMETRY_OPTOUT=1 --net=cicd-net -u root -v /var/run/docker.sock:/var/run/docker.sock --group-add 0', description: 'Arguments for the build container')
         string(name: 'NUGET_SOURCE', defaultValue: 'http://nexus:8081/repository/nuget-hosted/', description: 'NuGet feed URL (Nexus hosted repo, internal proxy, or https://api.nuget.org/v3/index.json)')
         string(name: 'NUGET_API_KEY_CREDENTIAL_ID', defaultValue: 'rhythm-nuget', description: 'Jenkins credential id (Secret Text) holding the NuGet API key for the target feed')
-        string(name: 'SOURCE_BUILD_JOB', defaultValue: 'net-build', description: 'Name of the upstream build job whose build-info.json will be pulled in')
+        string(name: 'SOURCE_BUILD_JOB', defaultValue: 'cicd-build', description: 'Name of the upstream build job whose build-info.json will be pulled in')
         string(name: 'SOURCE_BUILD_NUMBER', defaultValue: '', description: 'Specific upstream build number to publish. Leave empty for the last successful build.')
     }
 

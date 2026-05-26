@@ -11,7 +11,7 @@ pipeline {
         string(name: 'NEXUS_DOCKER_CREDENTIAL_ID', defaultValue: 'rhythm-docker', description: 'Jenkins credential id (Username/Password) for the Nexus docker registry')
         string(name: 'NEXUS_DOCKER_USER', defaultValue: 'admin', description: 'Nexus docker registry username (for Jenkins credentials)')
         string(name: 'NEXUS_DOCKER_PROTOCOL', defaultValue: 'http://', description: 'Nexus communications protocol (http or https)')
-        string(name: 'SOURCE_BUILD_JOB', defaultValue: 'net-build', description: 'Name of the upstream build job whose build-info.json will be pulled in')
+        string(name: 'SOURCE_BUILD_JOB', defaultValue: 'cicd-build', description: 'Name of the upstream build job whose build-info.json will be pulled in')
         string(name: 'SOURCE_BUILD_NUMBER', defaultValue: '', description: 'Specific upstream build number to publish. Leave empty for the last successful build.')
     }
 
