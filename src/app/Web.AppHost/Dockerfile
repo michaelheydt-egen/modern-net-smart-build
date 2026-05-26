@@ -26,7 +26,7 @@ COPY ["src/app/Web.Shared.Components.Layout/Web.Shared.Components.Layout.csproj"
 COPY ["src/app/Web.Shared.Components.Pages/Web.Shared.Components.Pages.csproj", "src/Web.Shared.Components.Pages/"]
 COPY ["src/app/Web.Shared/Web.Shared.csproj", "src/Web.Shared/"]
 COPY ["src/app/Web.Shared.Assets/Web.Shared.Assets.csproj", "src/Web.Shared.Assets/"]
-COPY ["src/Web.Shared.Components/Web.Shared.Components.csproj", "src/Web.Shared.Components/"]
+COPY ["src/app/Web.Shared.Components/Web.Shared.Components.csproj", "src/Web.Shared.Components/"]
 RUN dotnet restore "./src/Web.AppHost/Web.AppHost.csproj"
 COPY . .
 WORKDIR "/src/src/Web.AppHost"
