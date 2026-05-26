@@ -1,0 +1,52 @@
+.badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.3rem 0.75rem;
+    border-radius: 999px;
+    font-size: 0.85rem;
+    font-family: ui-monospace, monospace;
+    border: 1px solid #ccc;
+    background: #fafafa;
+    cursor: help;
+    user-select: none;
+}
+
+.badge .dot {
+    width: 0.6rem;
+    height: 0.6rem;
+    border-radius: 50%;
+    background: #999;
+}
+
+.badge .label {
+    color: #555;
+    font-weight: 500;
+}
+
+.badge .value {
+    color: #333;
+    font-weight: 600;
+}
+
+.badge.status-healthy        { background: #e8f5e9; border-color: #a5d6a7; }
+.badge.status-healthy .dot   { background: #2e7d32; box-shadow: 0 0 0 2px rgba(46, 125, 50, 0.18); }
+.badge.status-healthy .value { color: #1b5e20; }
+
+.badge.status-degraded        { background: #fff8e1; border-color: #ffe082; }
+.badge.status-degraded .dot   { background: #f9a825; box-shadow: 0 0 0 2px rgba(249, 168, 37, 0.2); }
+.badge.status-degraded .value { color: #8d6708; }
+
+.badge.status-unreachable        { background: #ffebee; border-color: #ef9a9a; }
+.badge.status-unreachable .dot   { background: #c62828; box-shadow: 0 0 0 2px rgba(198, 40, 40, 0.2); }
+.badge.status-unreachable .value { color: #b71c1c; }
+
+.badge.status-unknown        { background: #f5f5f5; border-color: #ccc; }
+.badge.status-unknown .dot   { background: #999; animation: pulse 1.4s infinite; }
+.badge.status-unknown .value { color: #666; font-style: italic; }
+
+@keyframes pulse {
+    0%   { opacity: 1; }
+    50%  { opacity: 0.4; }
+    100% { opacity: 1; }
+}

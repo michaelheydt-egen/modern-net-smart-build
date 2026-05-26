@@ -2,6 +2,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Util.Commands.Abstractions\Util.Commands.Abstractions.csproj" />
+    <ProjectReference Include="..\..\jenkins\Jenkins.Client\Jenkins.Client.csproj" />
+    <ProjectReference Include="..\..\jenkins\Jenkins.Orchestrator.Abstractions\Jenkins.Orchestrator.Abstractions.csproj" />
+    <ProjectReference Include="..\..\jenkins\Jenkins.Orchestrator\Jenkins.Orchestrator.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

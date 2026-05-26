@@ -111,10 +111,18 @@ pipeline {
         stage('Verify Deployment') {
             steps {
                 script {
-                    sh """
-                        SERVICE_URL=\$(gcloud run services describe ${params.GCR_APPHOST_SERVICE} --region=${params.GCR_REGION} --project=${params.GCP_PROJECT_ID} --format='value(status.url)')
-                        echo "Deployed to: \$SERVICE_URL"
-                    """
+                    // Capture the URL once into a Groovy variable so downstream stages
+                    // can reuse it without re-querying gcloud.
+                    SERVICE_URL = sh(
+                        script: "gcloud run services describe ${params.GCR_APPHOST_SERVICE} --region=${params.GCR_REGION} --project=${params.GCP_PROJECT_ID} --format='value(status.url)'",
+                        returnStdout: true
+                    ).trim()
+
+                    if (!SERVICE_URL) {
+                        error "Cloud Run service ${params.GCR_APPHOST_SERVICE} returned no URL — deploy likely failed."
+                    }
+
+                    println "Deployed to: ${SERVICE_URL}"
                 }
             }
         }
@@ -122,11 +130,36 @@ pipeline {
         stage('Health Check') {
             steps {
                 script {
-                    sh """
-                        HEALTH_CHECK_URL=\$(gcloud run services describe ${params.GCR_APPHOST_SERVICE} --region=${params.GCR_REGION} --project=${params.GCP_PROJECT_ID} --format='value(status.url)')/alive
-                        echo \$HEALTH_CHECK_URL
-                        curl -fsSL --max-time 30 \$HEALTH_CHECK_URL || echo "Health check failed"
-                    """
+                    def healthUrl = "${SERVICE_URL}/alive"
+                    println "Health check URL: ${healthUrl}"
+                    sh "curl -fsSL --max-time 30 ${healthUrl} || echo 'Health check failed'"
+                }
+            }
+        }
+
+        stage('Archive Deployment Info') {
+            steps {
+                script {
+                    def image = "${params.GAR_REGION}-docker.pkg.dev/${params.GCP_PROJECT_ID}/${params.GAR_REPOSITORY_NAME}/${params.GAR_APPHOST_CONTAINER_NAME}:${params.GAR_APPHOST_VERSION}"
+
+                    writeJSON file: 'deployment-info.json', json: [
+                        serviceUrl:        SERVICE_URL,
+                        serviceName:       params.GCR_APPHOST_SERVICE,
+                        region:            params.GCR_REGION,
+                        projectId:         params.GCP_PROJECT_ID,
+                        image:             image,
+                        garVersion:        params.GAR_APPHOST_VERSION,
+                        deployedAt:        new Date().format("yyyy-MM-dd'T'HH:mm:ss'Z'", TimeZone.getTimeZone('UTC')),
+                        sourceBuildJob:    params.SOURCE_BUILD_JOB,
+                        sourceBuildNumber: SOURCE_BUILD_NUM,
+                        packageVersion:    PACKAGE_VERSION,
+                        gitCommitHash:     GIT_COMMIT_HASH,
+                        gitCommitShort:    GIT_COMMIT_SHORT
+                    ], pretty: 2
+
+                    sh "cat deployment-info.json"
+
+                    archiveArtifacts artifacts: 'deployment-info.json', fingerprint: true, onlyIfSuccessful: true
                 }
             }
         }

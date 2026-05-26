@@ -1,0 +1,49 @@
+@inject IJenkinsHealth Health
+@implements IDisposable
+
+<div class="badge status-@_snapshot.Status.ToString().ToLowerInvariant()" title="@Tooltip()">
+    <span class="dot"></span>
+    <span class="label">Jenkins</span>
+    <span class="value">@StatusLabel()</span>
+</div>
+
+@code {
+    private JenkinsHealthSnapshot _snapshot = new(JenkinsHealthStatus.Unknown, null, null, null);
+
+    protected override void OnInitialized()
+    {
+        _snapshot = Health.Snapshot;
+        Health.StateChanged += OnChanged;
+    }
+
+    private void OnChanged()
+    {
+        _ = InvokeAsync(() =>
+        {
+            _snapshot = Health.Snapshot;
+            StateHasChanged();
+        });
+    }
+
+    public void Dispose()
+    {
+        Health.StateChanged -= OnChanged;
+    }
+
+    private string StatusLabel() => _snapshot.Status switch
+    {
+        JenkinsHealthStatus.Healthy     => "ok",
+        JenkinsHealthStatus.Degraded    => "degraded",
+        JenkinsHealthStatus.Unreachable => "unreachable",
+        _                               => "checking…"
+    };
+
+    private string Tooltip()
+    {
+        var last = _snapshot.LastCheckedAt is { } t
+            ? $"Last check: {t.LocalDateTime:HH:mm:ss}"
+            : "No check yet";
+        var detail = _snapshot.Detail is { Length: > 0 } d ? $" — {d}" : "";
+        return $"{last}{detail}";
+    }
+}

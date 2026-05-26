@@ -1,0 +1,159 @@
+@page "/"
+@rendermode InteractiveServer
+@inject IPipelineRunner Runner
+@implements IDisposable
+
+<PageTitle>CICD Pipeline</PageTitle>
+
+<div class="header">
+    <h1>CICD Pipeline</h1>
+    <div class="state state-@_snapshot.State.ToString().ToLowerInvariant()">@_snapshot.State</div>
+    <div class="actions">
+        @if (_snapshot.State == PipelineState.Running)
+        {
+            <button class="btn btn-danger" @onclick="OnCancel">Cancel</button>
+        }
+        else
+        {
+            <button class="btn btn-primary" @onclick="OnRun">Run Pipeline</button>
+        }
+    </div>
+</div>
+
+@if (_snapshot.State is PipelineState.Completed or PipelineState.Failed && _snapshot.Result is { } result)
+{
+    <div class="banner banner-@(result.Success ? "success" : "failure")">
+        Pipeline @(result.Success ? "succeeded" : "failed")
+        @if (!result.Success && result.FailureReason is { Length: > 0 } reason)
+        {
+            <span> — @reason</span>
+        }
+    </div>
+}
+
+<section>
+    <h2>Steps</h2>
+    <table class="steps">
+        <thead>
+            <tr>
+                <th></th>
+                <th>Job</th>
+                <th>Build</th>
+                <th>Status</th>
+                <th>Duration</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var step in _steps)
+            {
+                var view = StepStatusFor(step.JobName);
+                <tr>
+                    <td class="indicator">@view.Icon</td>
+                    <td class="job">@step.JobName</td>
+                    <td class="build">@(view.BuildNumber is int n ? $"#{n}" : "-")</td>
+                    <td class="status status-@view.StatusKey">@view.Status</td>
+                    <td class="duration">@(view.Duration is TimeSpan d ? $"{d.TotalSeconds:F1}s" : "-")</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</section>
+
+<section>
+    <h2>Events</h2>
+    <div class="events">
+        @if (_snapshot.Events.Count == 0)
+        {
+            <div class="empty">No events yet — click <em>Run Pipeline</em>.</div>
+        }
+        else
+        {
+            @foreach (var evt in _snapshot.Events)
+            {
+                <div class="event event-@EventKind(evt)">
+                    <span class="ts">[@evt.Timestamp.ToString("HH:mm:ss")]</span>
+                    <span class="job">@evt.JobName</span>
+                    <span class="text">@EventText(evt)</span>
+                </div>
+            }
+        }
+    </div>
+</section>
+
+@code {
+    private static readonly IReadOnlyList<PipelineStep> _steps = DefaultPipelines.CicdMain();
+
+    private PipelineSnapshot _snapshot = new(PipelineState.Idle, Array.Empty<PipelineEvent>(), null);
+
+    protected override void OnInitialized()
+    {
+        _snapshot = Runner.Snapshot;
+        Runner.StateChanged += OnStateChanged;
+    }
+
+    private void OnStateChanged()
+    {
+        _ = InvokeAsync(() =>
+        {
+            _snapshot = Runner.Snapshot;
+            StateHasChanged();
+        });
+    }
+
+    private void OnRun()
+    {
+        Runner.TryStart(_steps);
+    }
+
+    private void OnCancel()
+    {
+        Runner.Cancel();
+    }
+
+    public void Dispose()
+    {
+        Runner.StateChanged -= OnStateChanged;
+    }
+
+    private sealed record StepView(string Icon, string Status, string StatusKey, int? BuildNumber, TimeSpan? Duration);
+
+    private StepView StepStatusFor(string jobName)
+    {
+        PipelineEvent? latest = null;
+        for (var i = _snapshot.Events.Count - 1; i >= 0; i--)
+        {
+            if (string.Equals(_snapshot.Events[i].JobName, jobName, StringComparison.OrdinalIgnoreCase))
+            {
+                latest = _snapshot.Events[i];
+                break;
+            }
+        }
+
+        return latest switch
+        {
+            PipelineStepCompleted c => new("●", $"{c.Result}", "success", c.BuildNumber, c.Duration),
+            PipelineStepFailed f    => new("●", $"failed: {f.Reason}", "failure", null, null),
+            PipelineStepRunning r   => new("⟳", "running", "running", r.BuildNumber, null),
+            PipelineStepQueued q    => new("⟳", $"queued ({q.QueueId})", "running", null, null),
+            PipelineStepStarted s   => new("⟳", "starting", "running", null, null),
+            _                       => new("○", "pending", "pending", null, null)
+        };
+    }
+
+    private static string EventKind(PipelineEvent evt) => evt switch
+    {
+        PipelineStepCompleted => "success",
+        PipelineStepFailed    => "failure",
+        _                     => "info"
+    };
+
+    private static string EventText(PipelineEvent evt) => evt switch
+    {
+        PipelineStepStarted s   => s.UpstreamBuildNumber is int n ? $"started (consuming upstream build #{n})" : "started",
+        PipelineStepQueued q    => $"queued (queue item {q.QueueId})",
+        PipelineStepRunning r   => $"running as build #{r.BuildNumber}",
+        PipelineStepCompleted c => $"completed #{c.BuildNumber} {c.Result} in {c.Duration.TotalSeconds:F1}s",
+        PipelineStepFailed f    => $"FAILED — {f.Reason}",
+        _                       => evt.GetType().Name
+    };
+}

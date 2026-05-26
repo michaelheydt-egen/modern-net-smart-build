@@ -1,0 +1,108 @@
+.header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.header h1 {
+    margin: 0;
+    flex: 0;
+}
+
+.header .actions {
+    margin-left: auto;
+}
+
+.state {
+    padding: 0.25rem 0.75rem;
+    border-radius: 999px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    border: 1px solid #ccc;
+}
+
+.state-idle      { background: #f0f0f0; color: #555; }
+.state-running   { background: #e3f2fd; color: #0d47a1; border-color: #90caf9; }
+.state-completed { background: #e8f5e9; color: #1b5e20; border-color: #a5d6a7; }
+.state-failed    { background: #ffebee; color: #b71c1c; border-color: #ef9a9a; }
+
+.btn {
+    border: 1px solid #999;
+    padding: 0.45rem 1rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.95rem;
+}
+
+.btn-primary { background: #1976d2; color: white; border-color: #1565c0; }
+.btn-primary:hover { background: #1565c0; }
+.btn-danger  { background: #d32f2f; color: white; border-color: #c62828; }
+.btn-danger:hover { background: #c62828; }
+
+.banner {
+    padding: 0.75rem 1rem;
+    border-radius: 4px;
+    margin-bottom: 1rem;
+    font-weight: 500;
+}
+
+.banner-success { background: #e8f5e9; color: #1b5e20; border: 1px solid #a5d6a7; }
+.banner-failure { background: #ffebee; color: #b71c1c; border: 1px solid #ef9a9a; }
+
+section h2 {
+    font-size: 1.1rem;
+    margin: 1.5rem 0 0.5rem;
+}
+
+table.steps {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: ui-monospace, monospace;
+    font-size: 0.9rem;
+}
+
+table.steps th, table.steps td {
+    padding: 0.4rem 0.75rem;
+    border-bottom: 1px solid #eee;
+    text-align: left;
+}
+
+table.steps th {
+    background: #fafafa;
+    font-weight: 600;
+    color: #555;
+}
+
+td.indicator { width: 1.5rem; font-size: 1.1rem; }
+td.duration  { color: #777; width: 5rem; }
+td.build     { width: 5rem; color: #555; }
+td.job       { font-weight: 500; }
+
+.status-pending  { color: #888; }
+.status-running  { color: #0d47a1; }
+.status-success  { color: #1b5e20; font-weight: 500; }
+.status-failure  { color: #b71c1c; font-weight: 500; }
+
+.events {
+    background: #1e1e1e;
+    color: #d4d4d4;
+    border-radius: 4px;
+    padding: 0.75rem 1rem;
+    font-family: ui-monospace, monospace;
+    font-size: 0.85rem;
+    max-height: 400px;
+    overflow-y: auto;
+    line-height: 1.5;
+}
+
+.events .empty { color: #888; font-style: italic; }
+
+.event { white-space: pre; }
+
+.event .ts   { color: #888; margin-right: 0.5rem; }
+.event .job  { color: #569cd6; margin-right: 0.5rem; }
+.event-success .text { color: #6a9955; }
+.event-failure .text { color: #f48771; }
+.event-info    .text { color: #d4d4d4; }
