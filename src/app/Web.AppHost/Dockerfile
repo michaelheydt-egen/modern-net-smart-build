@@ -27,7 +27,7 @@ COPY ["src/app/Web.Shared.Components.Pages/Web.Shared.Components.Pages.csproj", 
 COPY ["src/app/Web.Shared/Web.Shared.csproj", "src/Web.Shared/"]
 COPY ["src/app/Web.Shared.Assets/Web.Shared.Assets.csproj", "src/Web.Shared.Assets/"]
 COPY ["src/app/Web.Shared.Components/Web.Shared.Components.csproj", "src/Web.Shared.Components/"]
-RUN ls -lsA
+RUN ls ./src
 RUN dotnet restore "./src/Web.AppHost/Web.AppHost.csproj"
 COPY . .
 WORKDIR "/src/src/Web.AppHost"
