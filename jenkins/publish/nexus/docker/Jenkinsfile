@@ -79,7 +79,7 @@ pipeline {
 
         stage('Create local docker image') {
             steps {
-                sh "docker build --file ${params.DOCKER_BUILD_FILE} -t ${params.CONTAINER_NAME}:${CONTAINER_TAG} ."
+                sh "docker build --file ${params.DOCKER_BUILD_FILE} -t ${params.CONTAINER_NAME}:${CONTAINER_TAG} ./src/app"
             }
         }
 
