@@ -19,3 +19,15 @@ RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     google-cloud-cli \
  && rm -rf /var/lib/apt/lists/*
+
+# Add Aqua Security Trivy apt repo + install. Trivy enriches the CycloneDX SBOM
+# generated in cicd-build with CVE data (sourced from GitHub Advisory + NVD).
+# Baking it in saves ~50 MB / build of binary download — the vuln DB still gets
+# fetched on first run unless BUILD_CONTAINER_ARGS mounts a cache (see docs/sbom-setup.md).
+RUN curl -fsSL https://aquasecurity.github.io/trivy-repo/deb/public.key \
+    | gpg --dearmor -o /usr/share/keyrings/trivy.gpg \
+ && echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb generic main" \
+    | tee /etc/apt/sources.list.d/trivy.list \
+ && apt-get update && apt-get install -y --no-install-recommends \
+    trivy \
+ && rm -rf /var/lib/apt/lists/*

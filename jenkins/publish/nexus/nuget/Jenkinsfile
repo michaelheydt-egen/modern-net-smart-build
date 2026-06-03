@@ -4,6 +4,8 @@ pipeline {
         string(name: 'BUILD_CONTAINER_ARGS', defaultValue: '-v /tmp/nuget:/tmp/nuget -e DOTNET_CLI_TELEMETRY_OPTOUT=1 --net=cicd-net -u root -v /var/run/docker.sock:/var/run/docker.sock --group-add 0', description: 'Arguments for the build container')
         string(name: 'NUGET_SOURCE', defaultValue: 'http://nexus:8081/repository/nuget-hosted/', description: 'NuGet feed URL (Nexus hosted repo, internal proxy, or https://api.nuget.org/v3/index.json)')
         string(name: 'NUGET_API_KEY_CREDENTIAL_ID', defaultValue: 'rhythm-nuget', description: 'Jenkins credential id (Secret Text) holding the NuGet API key for the target feed')
+        string(name: 'SBOM_NEXUS_REPO_URL', defaultValue: 'http://nexus:8081/repository/sboms/', description: 'Nexus raw (hosted) repo URL where bom.json + vulnerabilities.json are uploaded. Repo must be created as type=raw,format=hosted in Nexus first.')
+        string(name: 'SBOM_NEXUS_CREDENTIAL_ID', defaultValue: 'nexus-rest', description: 'Jenkins credential id (Username/Password) for HTTP Basic auth against the Nexus REST API used by the raw-repo PUT calls')
         string(name: 'SOURCE_BUILD_JOB', defaultValue: 'cicd-build', description: 'Name of the upstream build job whose build-info.json will be pulled in')
         string(name: 'SOURCE_BUILD_NUMBER', defaultValue: '', description: 'Specific upstream build number to publish. Leave empty for the last successful build.')
     }
@@ -46,10 +48,13 @@ pipeline {
                     def srcLabel = srcBuild ? "build #${srcBuild}" : "lastSuccessful()"
                     println "Fetching build-info.json from ${params.SOURCE_BUILD_JOB} (${srcLabel})"
 
+                    // Pulls the SBOM (bom.json) and vulnerability report (vulnerabilities.json)
+                    // alongside build-info.json so the upload stage can publish them in lockstep
+                    // with the .nupkg.
                     copyArtifacts(
                         projectName: params.SOURCE_BUILD_JOB,
                         selector: selector,
-                        filter: 'build-info.json',
+                        filter: 'build-info.json,bom.json,vulnerabilities.json,bom-vex.json',
                         fingerprintArtifacts: true
                     )
 
@@ -123,9 +128,55 @@ pipeline {
             }
         }
 
+        stage ('Publish SBOM') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: "${params.SBOM_NEXUS_CREDENTIAL_ID}", usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
+                    // Pushes the build's SBOM + vulnerability report into a Nexus raw
+                    // (hosted) repo keyed by package version, so each .nupkg has a
+                    // matching SBOM at a predictable path:
+                    //   <SBOM_NEXUS_REPO_URL>sbom/<PACKAGE_VERSION>/{bom.json,vulnerabilities.json}
+                    // Raw repos accept arbitrary file uploads via PUT; the path
+                    // becomes the asset path. Skips the upload (with a warning)
+                    // if the artifact is missing — the build job may have been an
+                    // older one that didn't produce it.
+                    sh """
+                        set -e
+                        base="${params.SBOM_NEXUS_REPO_URL}"
+                        # Trim trailing slash for clean concatenation.
+                        base="\${base%/}"
+                        target="\$base/sbom/${PACKAGE_VERSION}"
+                        echo "Uploading SBOM artifacts to \$target/"
+
+                        upload() {
+                            local f="\$1"
+                            if [ ! -f "\$f" ]; then
+                                echo "WARN: \$f not present in workspace — skipping upload."
+                                return 0
+                            fi
+                            echo "  PUT \$target/\$f"
+                            curl -fsS --user "\$NEXUS_USER:\$NEXUS_PASS" \\
+                                 --upload-file "\$f" \\
+                                 "\$target/\$f"
+                            echo
+                        }
+
+                        upload bom.json
+                        upload vulnerabilities.json
+                        upload bom-vex.json
+                    """
+                }
+            }
+        }
+
         stage ('Archive Build Info') {
             steps {
-                archiveArtifacts artifacts: 'build-info.json', fingerprint: true, onlyIfSuccessful: true
+                // Re-archive on this job so users browsing the publish run can grab
+                // the same SBOM + vuln report without bouncing back to cicd-build.
+                archiveArtifacts(
+                    artifacts: 'build-info.json,bom.json,vulnerabilities.json,bom-vex.json',
+                    fingerprint: true,
+                    onlyIfSuccessful: true,
+                    allowEmptyArchive: true)
             }
         }
     }
