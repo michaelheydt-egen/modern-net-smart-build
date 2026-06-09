@@ -1,0 +1,7 @@
+<Solution>
+  <Project Path="../deployment/Deployment.Contracts/Deployment.Contracts.csproj" />
+  <Project Path="../jenkins/Jenkins.Client/Jenkins.Client.csproj" />
+  <Project Path="../jenkins/Jenkins.Orchestrator.Abstractions/Jenkins.Orchestrator.Abstractions.csproj" />
+  <Project Path="../jenkins/Jenkins.Orchestrator/Jenkins.Orchestrator.csproj" />
+  <Project Path="cicd.web.admin/cicd.web.admin.csproj" />
+</Solution>

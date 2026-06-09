@@ -1,0 +1,167 @@
+@*
+    Create / edit a single ConfigurationSetting row. Mirrors the domain's
+    secret/plain dichotomy:
+      IsSecret = true  → Value disabled & null;     SecretReference required
+      IsSecret = false → SecretReference disabled;  Value required (empty string OK)
+
+    In Edit mode, Key and Environment scope are locked — that pair plus
+    DeployableUnitId is the row's natural identity (unique index in the DB).
+    To "move" a setting between envs, delete it and recreate.
+*@
+
+@inject DeploymentApiClient Api
+
+<MudDialog>
+    <DialogContent>
+        <MudStack Spacing="3" Style="min-width: 540px;">
+            <MudTextField @bind-Value="_key"
+                          Label="Key"
+                          Variant="Variant.Outlined"
+                          Required="true"
+                          ReadOnly="@IsEdit"
+                          MaxLength="500"
+                          HelperText="Hierarchical — e.g. ConnectionStrings:Default, FeatureFlags:NewCheckout" />
+
+            <MudSelect T="Guid?"
+                       @bind-Value="_environmentId"
+                       Label="Environment"
+                       Variant="Variant.Outlined"
+                       ReadOnly="@IsEdit"
+                       HelperText="@(IsEdit ? "Locked — delete & recreate to move between envs." : "Leave blank for the unit-wide default (lowest precedence).")">
+                <MudSelectItem T="Guid?" Value="@((Guid?)null)">(unit default)</MudSelectItem>
+                @foreach (var e in Environments ?? Array.Empty<EnvironmentDto>())
+                {
+                    <MudSelectItem T="Guid?" Value="@((Guid?)e.Id)">@e.Name (rank @e.PromotionRank)</MudSelectItem>
+                }
+            </MudSelect>
+
+            <MudSwitch T="bool"
+                       @bind-Value="_isSecret"
+                       @bind-Value:after="OnSecretToggle"
+                       Color="Color.Error"
+                       Label="Secret (store a reference, never the value)" />
+
+            @if (_isSecret)
+            {
+                <MudTextField @bind-Value="_secretRef"
+                              Label="Secret reference"
+                              Variant="Variant.Outlined"
+                              Required="true"
+                              MaxLength="500"
+                              HelperText="e.g. https://vault.vault.azure.net/secrets/billing-db, vault://prod/billing-db" />
+            }
+            else
+            {
+                <MudTextField @bind-Value="_value"
+                              Label="Value"
+                              Variant="Variant.Outlined"
+                              Required="true"
+                              Lines="@(_valueType == ConfigurationValueTypeDto.Json ? 5 : 1)"
+                              MaxLength="4000"
+                              HelperText="@ValueHint" />
+            }
+
+            <MudSelect T="ConfigurationValueTypeDto"
+                       @bind-Value="_valueType"
+                       Label="Value type"
+                       Variant="Variant.Outlined">
+                @foreach (var t in Enum.GetValues<ConfigurationValueTypeDto>())
+                {
+                    <MudSelectItem Value="@t">@t</MudSelectItem>
+                }
+            </MudSelect>
+
+            <MudTextField @bind-Value="_principal"
+                          Label="Changed by (principal)"
+                          Variant="Variant.Outlined"
+                          Required="true"
+                          MaxLength="200"
+                          HelperText="Identity making this change — captured in the history projection." />
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary"
+                   Variant="Variant.Filled"
+                   StartIcon="@Icons.Material.Filled.Save"
+                   OnClick="Submit"
+                   Disabled="@(!CanSubmit())">
+            @(IsEdit ? "Save" : "Add")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public bool IsEdit { get; set; }
+    [Parameter] public ConfigurationSettingDto? Existing { get; set; }
+    [Parameter] public IReadOnlyList<EnvironmentDto>? Environments { get; set; }
+
+    private string _key = "";
+    private Guid? _environmentId;
+    private bool _isSecret;
+    private string _value = "";
+    private string _secretRef = "";
+    private ConfigurationValueTypeDto _valueType = ConfigurationValueTypeDto.String;
+    private string _principal = "";
+
+    protected override void OnInitialized()
+    {
+        if (IsEdit && Existing is not null)
+        {
+            _key = Existing.Key;
+            _environmentId = Existing.EnvironmentId;
+            _isSecret = Existing.IsSecret;
+            _value = Existing.Value ?? "";
+            _secretRef = Existing.SecretReference ?? "";
+            _valueType = Existing.ValueType;
+        }
+    }
+
+    private void OnSecretToggle()
+    {
+        // Keep the field shown to the user clean — the hidden field is always
+        // null on submit regardless of what's stashed in the field.
+        if (_isSecret) _value = "";
+        else _secretRef = "";
+    }
+
+    private string ValueHint => _valueType switch
+    {
+        ConfigurationValueTypeDto.Bool => "true / false",
+        ConfigurationValueTypeDto.Int => "Integer — e.g. 42",
+        ConfigurationValueTypeDto.Json => "Inline JSON object/array.",
+        _ => "Plain string value.",
+    };
+
+    private bool CanSubmit()
+    {
+        if (string.IsNullOrWhiteSpace(_key)) return false;
+        if (string.IsNullOrWhiteSpace(_principal)) return false;
+        if (_isSecret) return !string.IsNullOrWhiteSpace(_secretRef);
+        // Plain values may be empty strings (operators sometimes want that
+        // explicitly) — only null is rejected, and our field defaults to "".
+        return _value is not null;
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private void Submit() => MudDialog.Close(DialogResult.Ok(new Result(
+        Key: _key.Trim(),
+        EnvironmentId: _environmentId,
+        IsSecret: _isSecret,
+        Value: _isSecret ? null : _value,
+        SecretReference: _isSecret ? _secretRef.Trim() : null,
+        ValueType: _valueType,
+        ChangedByPrincipal: _principal.Trim())));
+
+    public sealed record Result(
+        string Key,
+        Guid? EnvironmentId,
+        bool IsSecret,
+        string? Value,
+        string? SecretReference,
+        ConfigurationValueTypeDto ValueType,
+        string ChangedByPrincipal);
+}

@@ -1,0 +1,39 @@
+@*
+    Tiny "who is making this change?" prompt. Used by destructive flows where
+    the audit event needs a non-empty principal (e.g., delete a config setting).
+*@
+
+<MudDialog>
+    <DialogContent>
+        <MudStack Spacing="2" Style="min-width: 360px;">
+            <MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-secondary);">
+                This action is captured in the audit history. Identify yourself.
+            </MudText>
+            <MudTextField @bind-Value="_principal"
+                          Label="Principal"
+                          Variant="Variant.Outlined"
+                          Required="true"
+                          MaxLength="200"
+                          Immediate="true"
+                          AutoFocus="true" />
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Error"
+                   Variant="Variant.Filled"
+                   OnClick="Submit"
+                   Disabled="@string.IsNullOrWhiteSpace(_principal)">
+            Confirm
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    private string _principal = "";
+
+    private void Cancel() => MudDialog.Cancel();
+    private void Submit() => MudDialog.Close(DialogResult.Ok(_principal.Trim()));
+}

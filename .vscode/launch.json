@@ -1,0 +1,31 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      // cicd.web.admin — Blazor Server admin UI. The C# DevKit / C# extension
+      // picks this up as the default launch config (first entry in the list), so:
+      //   F5      → start with debugger attached (set breakpoints, inspect state)
+      //   Ctrl+F5 → start without debugger (just runs the app)
+      // Both share the same launchSettingsProfile so the port + env vars come
+      // from Properties/launchSettings.json (currently http://localhost:8090,
+      // ASPNETCORE_ENVIRONMENT=Development).
+      "name": "cicd.web.admin",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build-admin",
+      "program": "${workspaceFolder}/src/web-admin/cicd.web.admin/bin/Debug/net10.0/cicd.web.admin.dll",
+      "args": [],
+      "cwd": "${workspaceFolder}/src/web-admin/cicd.web.admin",
+      "stopAtEntry": false,
+      "console": "internalConsole",
+      "launchSettingsProfile": "http",
+      // Auto-open the WebUI in the default browser once Kestrel announces
+      // "Now listening on: …". Override via launchSettings.json launchBrowser=false
+      // if you'd rather click the URL yourself.
+      "serverReadyAction": {
+        "action": "openExternally",
+        "pattern": "\\bNow listening on:\\s+(https?://\\S+)"
+      }
+    }
+  ]
+}

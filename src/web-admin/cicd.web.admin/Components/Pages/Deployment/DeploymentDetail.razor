@@ -1,0 +1,370 @@
+@page "/deployment/deployments/{Id:guid}"
+@inject DeploymentApiClient Api
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+
+<PageTitle>Deployment — @_detail?.Head.DeployableUnitName v@_detail?.Head.ReleaseSemanticVersion</PageTitle>
+
+<MudBreadcrumbs Items="@_crumbs" Class="mb-2" />
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" />
+}
+else if (_error is { Length: > 0 })
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="my-2">@_error</MudAlert>
+}
+else if (_detail is not null)
+{
+    var head = _detail.Head;
+
+    <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3">
+        <MudText Typo="Typo.h4">
+            @head.DeployableUnitName <span style="font-family: ui-monospace, monospace;">v@head.ReleaseSemanticVersion</span>
+        </MudText>
+        <MudText Typo="Typo.body1" Style="color: var(--mud-palette-text-secondary);">
+            → @head.EnvironmentName
+        </MudText>
+        <MudChip T="string" Size="Size.Small"
+                 Color="@StatusColor(head.Status)" Variant="Variant.Filled">
+            @head.Status
+        </MudChip>
+        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@head.Strategy</MudChip>
+        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@head.Trigger</MudChip>
+        <MudSpacer />
+        @if (head.Status == DeploymentStatusDto.Queued)
+        {
+            <MudButton Variant="Variant.Outlined"
+                       Color="Color.Success"
+                       StartIcon="@Icons.Material.Filled.ThumbUpAlt"
+                       OnClick="OpenApproveDialog">Approve / Reject</MudButton>
+            <MudButton Variant="Variant.Outlined"
+                       Color="Color.Warning"
+                       StartIcon="@Icons.Material.Filled.Cancel"
+                       OnClick="OpenCancelDialog">Cancel</MudButton>
+        }
+    </MudStack>
+
+    <MudGrid>
+        <MudItem xs="12" md="6">
+            <MudPaper Elevation="1" Class="pa-4 mb-4">
+                <MudText Typo="Typo.h6" Class="mb-3">Identity</MudText>
+                <DetailRow Label="Triggered by" Value="@head.TriggeredByPrincipal" />
+                <DetailRow Label="Release"
+                           Value="@($"{head.DeployableUnitName} v{head.ReleaseSemanticVersion}")" />
+                @if (head.TargetId is null)
+                {
+                    <DetailRow Label="Scope" Value="cascade parent (no concrete target)" />
+                }
+                else
+                {
+                    <DetailRow Label="Target" Value="@(head.TargetResourceId ?? head.TargetId.Value.ToString())" Mono="true" />
+                }
+                @if (head.ParentDeploymentId is { } parentId)
+                {
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1" Class="mt-2">
+                        <MudText Typo="Typo.body2" Style="min-width: 11rem; color: var(--mud-palette-text-secondary);">
+                            Parent cascade
+                        </MudText>
+                        <MudLink Href="@($"/deployment/deployments/{parentId}")">
+                            view parent
+                        </MudLink>
+                    </MudStack>
+                }
+                <DetailRow Label="Started (UTC)" Value="@(head.StartedAtUtc?.ToString("u") ?? "—")" />
+                <DetailRow Label="Completed (UTC)" Value="@(head.CompletedAtUtc?.ToString("u") ?? "—")" />
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" md="6">
+            <MudPaper Elevation="1" Class="pa-4 mb-4">
+                <MudText Typo="Typo.h6" Class="mb-3">Outcome / overrides</MudText>
+                @if (_detail.FailureReason is not null)
+                {
+                    <DetailRow Label="Failure reason" Value="@_detail.FailureReason" />
+                }
+                @if (_detail.CancellationReason is not null)
+                {
+                    <DetailRow Label="Cancellation reason" Value="@_detail.CancellationReason" />
+                }
+                @if (_detail.RolledBackByDeploymentId is { } rbId)
+                {
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="1">
+                        <MudText Typo="Typo.body2" Style="min-width: 11rem; color: var(--mud-palette-text-secondary);">
+                            Rolled back by
+                        </MudText>
+                        <MudLink Href="@($"/deployment/deployments/{rbId}")">view rollback</MudLink>
+                    </MudStack>
+                }
+                @if (_detail.SkipPromotionPathReason is not null)
+                {
+                    <DetailRow Label="Skip promotion reason" Value="@_detail.SkipPromotionPathReason" />
+                }
+                @if (_detail.OverrideFreezeReason is not null)
+                {
+                    <DetailRow Label="Override freeze reason" Value="@_detail.OverrideFreezeReason" />
+                }
+                @if (_detail.FailureReason is null
+                     && _detail.CancellationReason is null
+                     && _detail.RolledBackByDeploymentId is null
+                     && _detail.SkipPromotionPathReason is null
+                     && _detail.OverrideFreezeReason is null)
+                {
+                    <MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-secondary);">
+                        Clean run — no failure, cancellation, or override reasons recorded.
+                    </MudText>
+                }
+            </MudPaper>
+        </MudItem>
+
+        @if (_detail.Children.Count > 0)
+        {
+            <MudItem xs="12">
+                <MudPaper Elevation="1" Class="pa-4 mb-4">
+                    <MudText Typo="Typo.h6" Class="mb-3">Cascade children (@_detail.Children.Count)</MudText>
+                    <MudTable Items="@_detail.Children" T="DeploymentSummaryDto" Dense="true" Hover="true">
+                        <HeaderContent>
+                            <MudTh Style="width: 7rem;">Status</MudTh>
+                            <MudTh>Service</MudTh>
+                            <MudTh>Target</MudTh>
+                            <MudTh Style="width: 10rem;">Started</MudTh>
+                            <MudTh Style="width: 4rem;"></MudTh>
+                        </HeaderContent>
+                        <RowTemplate>
+                            <MudTd>
+                                <MudChip T="string" Size="Size.Small"
+                                         Color="@StatusColor(context.Status)" Variant="Variant.Filled">
+                                    @context.Status
+                                </MudChip>
+                            </MudTd>
+                            <MudTd>
+                                @context.DeployableUnitName <strong>v@context.ReleaseSemanticVersion</strong>
+                            </MudTd>
+                            <MudTd Style="font-family: ui-monospace, monospace; font-size: 0.85em;">
+                                @(context.TargetResourceId ?? "—")
+                            </MudTd>
+                            <MudTd Style="font-size: 0.85em;">
+                                @(context.StartedAtUtc?.ToString("yyyy-MM-dd HH:mm") ?? "—")
+                            </MudTd>
+                            <MudTd>
+                                <MudIconButton Icon="@Icons.Material.Filled.ArrowForward"
+                                               Size="Size.Small"
+                                               OnClick="@(() => Nav.NavigateTo($"/deployment/deployments/{context.Id}"))" />
+                            </MudTd>
+                        </RowTemplate>
+                    </MudTable>
+                </MudPaper>
+            </MudItem>
+        }
+
+        <MudItem xs="12" md="6">
+            <MudPaper Elevation="1" Class="pa-4 mb-4">
+                <MudText Typo="Typo.h6" Class="mb-3">Approvals (@_detail.Approvals.Count)</MudText>
+                @if (_detail.Approvals.Count == 0)
+                {
+                    <MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-secondary);">
+                        No approvals requested.
+                    </MudText>
+                }
+                else
+                {
+                    <MudTable Items="@_detail.Approvals" T="ApprovalDto" Dense="true" Hover="false">
+                        <HeaderContent>
+                            <MudTh>Approver</MudTh>
+                            <MudTh Style="width: 8rem;">Verdict</MudTh>
+                            <MudTh Style="width: 12rem;">Decided</MudTh>
+                            <MudTh>Comment</MudTh>
+                        </HeaderContent>
+                        <RowTemplate>
+                            <MudTd>@context.ApproverPrincipal</MudTd>
+                            <MudTd>
+                                <MudChip T="string" Size="Size.Small"
+                                         Color="@ApprovalColor(context.Status)" Variant="Variant.Filled">
+                                    @context.Status
+                                </MudChip>
+                            </MudTd>
+                            <MudTd Style="font-size: 0.85em;">
+                                @(context.DecidedAtUtc?.ToString("u") ?? "—")
+                            </MudTd>
+                            <MudTd>@(context.Comment ?? "")</MudTd>
+                        </RowTemplate>
+                    </MudTable>
+                }
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" md="6">
+            <MudPaper Elevation="1" Class="pa-4 mb-4">
+                <MudText Typo="Typo.h6" Class="mb-3">Secret bindings (@_detail.SecretBindings.Count)</MudText>
+                @if (_detail.SecretBindings.Count == 0)
+                {
+                    <MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-secondary);">
+                        No secret bindings — no secret configuration was in scope for this row.
+                    </MudText>
+                }
+                else
+                {
+                    <MudTable Items="@_detail.SecretBindings" T="DeploymentSecretBindingDto" Dense="true" Hover="false">
+                        <HeaderContent>
+                            <MudTh>Key</MudTh>
+                            <MudTh>Resolved URI</MudTh>
+                        </HeaderContent>
+                        <RowTemplate>
+                            <MudTd Style="font-family: ui-monospace, monospace;">@context.ConfigurationKey</MudTd>
+                            <MudTd Style="font-family: ui-monospace, monospace; font-size: 0.8em;">
+                                @context.ResolvedSecretUri
+                            </MudTd>
+                        </RowTemplate>
+                    </MudTable>
+                }
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12">
+            <MudPaper Elevation="1" Class="pa-4 mb-4">
+                <MudText Typo="Typo.h6" Class="mb-3">Audit events (@_detail.Events.Count)</MudText>
+                @if (_detail.Events.Count == 0)
+                {
+                    <MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-secondary);">
+                        No audit events recorded.
+                    </MudText>
+                }
+                else
+                {
+                    <MudTimeline TimelinePosition="TimelinePosition.Start">
+                        @foreach (var e in _detail.Events)
+                        {
+                            <MudTimelineItem Color="Color.Info" Size="Size.Small">
+                                <ItemContent>
+                                    <MudText Typo="Typo.body2">
+                                        <strong>@e.EventType</strong>
+                                        <span style="color: var(--mud-palette-text-secondary);">
+                                            @(" @ " + e.Timestamp.ToString("u"))
+                                        </span>
+                                    </MudText>
+                                    @if (!string.IsNullOrWhiteSpace(e.Detail))
+                                    {
+                                        <MudText Typo="Typo.caption" Style="font-family: ui-monospace, monospace; white-space: pre-wrap;">
+                                            @e.Detail
+                                        </MudText>
+                                    }
+                                </ItemContent>
+                            </MudTimelineItem>
+                        }
+                    </MudTimeline>
+                }
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12">
+            <MudPaper Elevation="1" Class="pa-4">
+                <MudText Typo="Typo.h6" Class="mb-2">Metadata</MudText>
+                <DetailRow Label="Deployment id" Value="@head.Id.ToString()" Mono="true" />
+                <DetailRow Label="Release id" Value="@head.ReleaseId.ToString()" Mono="true" />
+                <DetailRow Label="Environment id" Value="@head.EnvironmentId.ToString()" Mono="true" />
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+}
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+
+    private DeploymentDetailDto? _detail;
+    private bool _loading;
+    private string? _error;
+    private List<BreadcrumbItem> _crumbs = new();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Id == Guid.Empty) { _error = "Invalid deployment id."; return; }
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true; _error = null;
+        try
+        {
+            _detail = await Api.GetDeploymentAsync(Id);
+            if (_detail is null) { _error = $"Deployment {Id} not found."; return; }
+            _crumbs = new()
+            {
+                new BreadcrumbItem("Deployments", "/deployment/deployments"),
+                new BreadcrumbItem($"{_detail.Head.DeployableUnitName} v{_detail.Head.ReleaseSemanticVersion}",
+                    href: null, disabled: true),
+            };
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private async Task OpenApproveDialog()
+    {
+        if (_detail is null) return;
+        var parameters = new DialogParameters
+        {
+            ["TriggeredByPrincipal"] = _detail.Head.TriggeredByPrincipal,
+        };
+        var dlg = await DialogService.ShowAsync<ApproveDeploymentDialog>("Approval", parameters);
+        var result = await dlg.Result;
+        if (result is null || result.Canceled || result.Data is not ApproveDeploymentDialog.Result data) return;
+
+        try
+        {
+            await Api.ApproveDeploymentAsync(_detail.Head.Id, new ApproveDeploymentRequest(
+                ApprovalId: Guid.NewGuid(),
+                ApproverPrincipal: data.ApproverPrincipal,
+                Verdict: data.Verdict,
+                Comment: data.Comment));
+            Snackbar.Add($"{data.Verdict} recorded.", Severity.Success);
+            await LoadAsync();
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+
+    private async Task OpenCancelDialog()
+    {
+        if (_detail is null) return;
+        var parameters = new DialogParameters
+        {
+            ["Message"] = "Cancel this queued deployment? This cannot be undone.",
+            ["Items"] = (IReadOnlyList<string>)new[]
+            {
+                $"{_detail.Head.DeployableUnitName} v{_detail.Head.ReleaseSemanticVersion} → {_detail.Head.EnvironmentName}",
+            },
+        };
+        var dlg = await DialogService.ShowAsync<ConfirmDeleteDialog>("Cancel deployment", parameters);
+        var result = await dlg.Result;
+        if (result is null || result.Canceled || result.Data is not true) return;
+
+        // ConfirmDeleteDialog doesn't capture a reason; use a fixed one for v1.
+        try
+        {
+            await Api.CancelDeploymentAsync(_detail.Head.Id, new CancelDeploymentRequest("Cancelled from UI"));
+            Snackbar.Add("Deployment cancelled.", Severity.Success);
+            await LoadAsync();
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+
+    private static Color StatusColor(DeploymentStatusDto s) => s switch
+    {
+        DeploymentStatusDto.Queued => Color.Default,
+        DeploymentStatusDto.Running => Color.Info,
+        DeploymentStatusDto.Succeeded => Color.Success,
+        DeploymentStatusDto.Failed => Color.Error,
+        DeploymentStatusDto.Cancelled => Color.Warning,
+        DeploymentStatusDto.RolledBack => Color.Warning,
+        DeploymentStatusDto.HealthChecking => Color.Info,
+        _ => Color.Default,
+    };
+
+    private static Color ApprovalColor(ApprovalStatusDto s) => s switch
+    {
+        ApprovalStatusDto.Pending => Color.Default,
+        ApprovalStatusDto.Approved => Color.Success,
+        ApprovalStatusDto.Rejected => Color.Error,
+        _ => Color.Default,
+    };
+}

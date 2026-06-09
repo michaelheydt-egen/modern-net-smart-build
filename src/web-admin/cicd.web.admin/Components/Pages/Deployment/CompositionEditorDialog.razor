@@ -1,0 +1,194 @@
+@*
+    Add / edit a single ReleaseComposition entry on an Application release's BOM.
+
+    Pin-mode rules (mirrored from the domain invariant):
+      Pinned  → ServiceReleaseId required; user picks a specific release
+      Latest  → ServiceReleaseId must be null; resolved at deploy time
+      Current → ServiceReleaseId must be null; resolves to whatever ran in env
+
+    Add path: pick from Services that aren't already in the BOM.
+    Edit path: Service field is read-only; PinMode + ServiceReleaseId are mutable.
+*@
+
+@inject DeploymentApiClient Api
+
+<MudDialog>
+    <DialogContent>
+        <MudStack Spacing="3" Style="min-width: 520px;">
+            @if (IsEdit && Existing is not null)
+            {
+                <MudTextField Value="@Existing.ServiceName"
+                              Label="Service"
+                              Variant="Variant.Outlined"
+                              ReadOnly="true" />
+            }
+            else
+            {
+                <MudSelect T="Guid"
+                           Value="_serviceId"
+                           ValueChanged="OnServiceChangedAsync"
+                           Label="Service"
+                           Variant="Variant.Outlined"
+                           Required="true">
+                    @foreach (var s in PickableServices ?? Array.Empty<ServiceDto>())
+                    {
+                        <MudSelectItem Value="@s.Id">@s.Name (@s.Kind)</MudSelectItem>
+                    }
+                </MudSelect>
+            }
+
+            <MudSelect T="PinModeDto"
+                       Value="_pinMode"
+                       ValueChanged="OnPinModeChangedAsync"
+                       Label="Pin mode"
+                       Variant="Variant.Outlined">
+                <MudSelectItem Value="@PinModeDto.Pinned">Pinned — exact version</MudSelectItem>
+                <MudSelectItem Value="@PinModeDto.Latest">Latest — newest Available at deploy time</MudSelectItem>
+                <MudSelectItem Value="@PinModeDto.Current">Current — what's running in the target environment</MudSelectItem>
+            </MudSelect>
+
+            @if (_pinMode == PinModeDto.Pinned)
+            {
+                @if (_loadingReleases)
+                {
+                    <MudProgressLinear Indeterminate="true" />
+                }
+                else if (_serviceReleases is null || _serviceReleases.Count == 0)
+                {
+                    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true">
+                        @if (_serviceId == Guid.Empty)
+                        {
+                            <text>Pick a service first.</text>
+                        }
+                        else
+                        {
+                            <text>This service has no releases yet — Pinned mode is unavailable until one is published.</text>
+                        }
+                    </MudAlert>
+                }
+                else
+                {
+                    <MudSelect T="Guid?"
+                               @bind-Value="_serviceReleaseId"
+                               Label="Service release (pinned version)"
+                               Variant="Variant.Outlined"
+                               Required="true">
+                        @foreach (var r in _serviceReleases)
+                        {
+                            <MudSelectItem T="Guid?" Value="@((Guid?)r.Id)">
+                                v@(r.SemanticVersion) — @r.Status (@r.CreatedAtUtc.ToString("yyyy-MM-dd"))
+                            </MudSelectItem>
+                        }
+                    </MudSelect>
+                }
+            }
+            else
+            {
+                <MudText Typo="Typo.caption" Style="color: var(--mud-palette-text-secondary);">
+                    Latest and Current are resolved at deploy time; no version is bound here.
+                </MudText>
+            }
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary"
+                   Variant="Variant.Filled"
+                   OnClick="Submit"
+                   Disabled="@(!CanSubmit())">
+            @(IsEdit ? "Save" : "Add")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public bool IsEdit { get; set; }
+
+    /// <summary>Services available for Add mode (catalog minus services already in this BOM).</summary>
+    [Parameter] public IReadOnlyList<ServiceDto>? PickableServices { get; set; }
+
+    /// <summary>Existing BOM row (Edit mode only).</summary>
+    [Parameter] public ReleaseCompositionEntryDto? Existing { get; set; }
+
+    private Guid _serviceId;
+    private PinModeDto _pinMode = PinModeDto.Latest;
+    private Guid? _serviceReleaseId;
+    private IReadOnlyList<ReleaseDto>? _serviceReleases;
+    private bool _loadingReleases;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (IsEdit && Existing is not null)
+        {
+            _serviceId = Existing.ServiceId;
+            _pinMode = Existing.PinMode;
+            _serviceReleaseId = Existing.ServiceReleaseId;
+            await LoadReleasesForServiceAsync();
+        }
+    }
+
+    private async Task OnServiceChangedAsync(Guid newServiceId)
+    {
+        _serviceId = newServiceId;
+        _serviceReleaseId = null;
+        await LoadReleasesForServiceAsync();
+    }
+
+    private async Task OnPinModeChangedAsync(PinModeDto newMode)
+    {
+        _pinMode = newMode;
+        if (_pinMode != PinModeDto.Pinned)
+        {
+            // Latest/Current require null version; clear any stale selection.
+            _serviceReleaseId = null;
+        }
+        else if (_serviceReleases is null && _serviceId != Guid.Empty)
+        {
+            await LoadReleasesForServiceAsync();
+        }
+    }
+
+    private async Task LoadReleasesForServiceAsync()
+    {
+        if (_serviceId == Guid.Empty)
+        {
+            _serviceReleases = null;
+            return;
+        }
+
+        _loadingReleases = true;
+        try
+        {
+            // Only Available releases are eligible for a Pinned binding.
+            var all = await Api.ListReleasesAsync(_serviceId);
+            _serviceReleases = all
+                .Where(r => r.Status == ReleaseStatusDto.Available)
+                .OrderByDescending(r => r.CreatedAtUtc)
+                .ToList();
+        }
+        finally
+        {
+            _loadingReleases = false;
+        }
+    }
+
+    private bool CanSubmit()
+    {
+        if (!IsEdit && _serviceId == Guid.Empty) return false;
+        if (_pinMode == PinModeDto.Pinned && (_serviceReleaseId is null || _serviceReleaseId == Guid.Empty)) return false;
+        return true;
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private void Submit()
+    {
+        // Normalize: Latest/Current must carry a null ServiceReleaseId.
+        var releaseId = _pinMode == PinModeDto.Pinned ? _serviceReleaseId : null;
+        MudDialog.Close(DialogResult.Ok(new Result(_serviceId, _pinMode, releaseId)));
+    }
+
+    public sealed record Result(Guid ServiceId, PinModeDto PinMode, Guid? ServiceReleaseId);
+}

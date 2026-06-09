@@ -1,0 +1,289 @@
+@page "/deployment/deployments/new"
+@inject DeploymentApiClient Api
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+
+<PageTitle>Deployment — Start</PageTitle>
+
+<MudBreadcrumbs Items="@_crumbs" Class="mb-2" />
+<MudText Typo="Typo.h4" Class="mb-3">Start a deployment</MudText>
+
+@if (_error is { Length: > 0 })
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-2">@_error</MudAlert>
+}
+
+<MudPaper Elevation="1" Class="pa-4" Style="max-width: 920px;">
+    <MudStack Spacing="3">
+        <MudGrid>
+            <MudItem xs="12" md="6">
+                <MudSelect T="DeployableUnitChoice"
+                           Value="_unit"
+                           ValueChanged="OnUnitChangedAsync"
+                           Label="Service or application"
+                           Variant="Variant.Outlined"
+                           Required="true">
+                    @foreach (var u in _unitChoices)
+                    {
+                        <MudSelectItem Value="@u">@u.Display</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudSelect T="ReleaseDto"
+                           Value="_release"
+                           ValueChanged="OnReleaseChanged"
+                           Label="Release"
+                           Variant="Variant.Outlined"
+                           Required="true"
+                           Disabled="@(_unit is null)">
+                    @foreach (var r in _releasesForUnit ?? Array.Empty<ReleaseDto>())
+                    {
+                        <MudSelectItem Value="@r">v@(r.SemanticVersion) — @r.Status (@r.CreatedAtUtc.ToString("yyyy-MM-dd"))</MudSelectItem>
+                    }
+                </MudSelect>
+                @if (_release is not null && _release.Status != ReleaseStatusDto.Available)
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Warning">
+                        This release is @(_release.Status). The Start handler will reject anything but Available.
+                    </MudText>
+                }
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudSelect T="Guid?"
+                           Value="_environmentId"
+                           ValueChanged="OnEnvChanged"
+                           Label="Environment"
+                           Variant="Variant.Outlined"
+                           Required="true">
+                    @foreach (var e in _environments ?? Array.Empty<EnvironmentDto>())
+                    {
+                        <MudSelectItem T="Guid?" Value="@((Guid?)e.Id)">
+                            @e.Name (rank @e.PromotionRank@(e.IsProduction ? ", prod" : ""))
+                        </MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudSelect T="Guid"
+                           SelectedValues="_selectedTargetIds"
+                           SelectedValuesChanged="OnTargetsChanged"
+                           Label="Targets (leave empty for all)"
+                           Variant="Variant.Outlined"
+                           MultiSelection="true"
+                           Disabled="@(_currentEnvTargets is null)">
+                    @foreach (var t in _currentEnvTargets ?? Array.Empty<DeploymentTargetDto>())
+                    {
+                        <MudSelectItem Value="@t.Id">@t.TargetKind · @t.Region · @t.ResourceId</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudSelect T="DeploymentStrategyDto"
+                           @bind-Value="_strategy"
+                           Label="Strategy"
+                           Variant="Variant.Outlined">
+                    @foreach (var s in Enum.GetValues<DeploymentStrategyDto>())
+                    {
+                        <MudSelectItem Value="@s">@s</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudSelect T="DeploymentTriggerDto"
+                           @bind-Value="_trigger"
+                           Label="Trigger"
+                           Variant="Variant.Outlined">
+                    @foreach (var t in Enum.GetValues<DeploymentTriggerDto>())
+                    {
+                        <MudSelectItem Value="@t">@t</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" md="6">
+                <MudTextField @bind-Value="_principal"
+                              Label="Triggered by (principal)"
+                              Variant="Variant.Outlined"
+                              Required="true"
+                              MaxLength="200" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudExpansionPanels>
+                    <MudExpansionPanel Text="Optional: out-of-band overrides">
+                        <MudStack Spacing="3">
+                            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">
+                                These fields are soft-policed by the Start handler. Set them with
+                                an audit reason if you need to deploy out-of-order on the promotion
+                                path or during a freeze window.
+                            </MudAlert>
+                            <MudTextField @bind-Value="_skipPromotionReason"
+                                          Label="Skip promotion path reason"
+                                          Variant="Variant.Outlined"
+                                          Lines="2"
+                                          MaxLength="500"
+                                          HelperText="Required when there's no prior succeeded deployment of the same release in the env one rank lower." />
+                            <MudTextField @bind-Value="_overrideFreezeReason"
+                                          Label="Override freeze reason"
+                                          Variant="Variant.Outlined"
+                                          Lines="2"
+                                          MaxLength="500"
+                                          HelperText="Required when an active freeze window covers the deploy time." />
+                        </MudStack>
+                    </MudExpansionPanel>
+                </MudExpansionPanels>
+            </MudItem>
+            <MudItem xs="12">
+                <MudStack Row="true" Spacing="2">
+                    <MudButton Variant="Variant.Filled"
+                               Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.PlayArrow"
+                               OnClick="StartAsync"
+                               Disabled="@(!CanSubmit() || _starting)">
+                        Start
+                    </MudButton>
+                    <MudButton Variant="Variant.Text"
+                               OnClick="@(() => Nav.NavigateTo("/deployment/deployments"))">
+                        Cancel
+                    </MudButton>
+                </MudStack>
+            </MudItem>
+        </MudGrid>
+    </MudStack>
+</MudPaper>
+
+@code {
+    [SupplyParameterFromQuery] public Guid? ReleaseId { get; set; }
+
+    private readonly List<BreadcrumbItem> _crumbs = new()
+    {
+        new BreadcrumbItem("Deployments", "/deployment/deployments"),
+        new BreadcrumbItem("Start", href: null, disabled: true),
+    };
+
+    private IReadOnlyList<ServiceDto>? _services;
+    private IReadOnlyList<ApplicationDto>? _applications;
+    private IReadOnlyList<EnvironmentDto>? _environments;
+    private IReadOnlyList<ReleaseDto>? _releasesForUnit;
+    private IReadOnlyList<DeploymentTargetDto>? _currentEnvTargets;
+    private List<DeployableUnitChoice> _unitChoices = new();
+
+    private DeployableUnitChoice? _unit;
+    private ReleaseDto? _release;
+    private Guid? _environmentId;
+    private IReadOnlyCollection<Guid> _selectedTargetIds = Array.Empty<Guid>();
+    private DeploymentStrategyDto _strategy = DeploymentStrategyDto.Direct;
+    private DeploymentTriggerDto _trigger = DeploymentTriggerDto.Manual;
+    private string _principal = "";
+    private string? _skipPromotionReason;
+    private string? _overrideFreezeReason;
+    private bool _starting;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var sTask = Api.ListServicesAsync(onlyActive: true);
+            var aTask = Api.ListApplicationsAsync(onlyActive: true);
+            var eTask = Api.ListEnvironmentsAsync();
+            await Task.WhenAll(sTask, aTask, eTask);
+            _services = await sTask;
+            _applications = await aTask;
+            _environments = await eTask;
+
+            _unitChoices = _services.Select(s => new DeployableUnitChoice(s.Id, s.Name, IsApplication: false))
+                .Concat(_applications.Select(a => new DeployableUnitChoice(a.Id, a.Name, IsApplication: true)))
+                .OrderBy(u => u.IsApplication).ThenBy(u => u.Name)
+                .ToList();
+
+            // Deep-link support: ?releaseId=... pre-selects the release and its unit.
+            if (ReleaseId is { } rid)
+            {
+                var rel = await Api.GetReleaseAsync(rid);
+                if (rel is not null)
+                {
+                    var match = _unitChoices.FirstOrDefault(u => u.Id == rel.DeployableUnitId);
+                    if (match is not null)
+                    {
+                        await OnUnitChangedAsync(match);
+                        _release = _releasesForUnit?.FirstOrDefault(r => r.Id == rel.Id) ?? rel;
+                    }
+                }
+            }
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private async Task OnUnitChangedAsync(DeployableUnitChoice u)
+    {
+        _unit = u;
+        _release = null;
+        _releasesForUnit = null;
+        if (u is null) return;
+        try
+        {
+            var all = await Api.ListReleasesAsync(u.Id);
+            _releasesForUnit = all
+                .Where(r => r.Status == ReleaseStatusDto.Available)
+                .OrderByDescending(r => r.CreatedAtUtc)
+                .ToList();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+    }
+
+    private void OnReleaseChanged(ReleaseDto r) => _release = r;
+
+    private void OnEnvChanged(Guid? id)
+    {
+        _environmentId = id;
+        _currentEnvTargets = id is { } eid
+            ? _environments?.FirstOrDefault(e => e.Id == eid)?.Targets ?? Array.Empty<DeploymentTargetDto>()
+            : null;
+        _selectedTargetIds = Array.Empty<Guid>();
+    }
+
+    private void OnTargetsChanged(IEnumerable<Guid> ids) => _selectedTargetIds = ids?.ToList() ?? new List<Guid>();
+
+    private bool CanSubmit() =>
+        _release is not null
+        && _environmentId is not null
+        && !string.IsNullOrWhiteSpace(_principal)
+        && _currentEnvTargets is { Count: > 0 };
+
+    private async Task StartAsync()
+    {
+        if (_release is null || _environmentId is null) return;
+        _starting = true; _error = null;
+        try
+        {
+            var body = new StartDeploymentRequest(
+                ReleaseId: _release.Id,
+                EnvironmentId: _environmentId.Value,
+                TargetIds: _selectedTargetIds.ToList(),
+                Strategy: _strategy,
+                Trigger: _trigger,
+                TriggeredByPrincipal: _principal.Trim(),
+                SkipPromotionPathReason: string.IsNullOrWhiteSpace(_skipPromotionReason) ? null : _skipPromotionReason.Trim(),
+                OverrideFreezeReason: string.IsNullOrWhiteSpace(_overrideFreezeReason) ? null : _overrideFreezeReason.Trim());
+            var started = await Api.StartDeploymentAsync(body);
+
+            // Navigate to the parent if there is one (Application cascade);
+            // otherwise to the first leaf row.
+            var target = started.ParentDeploymentId
+                         ?? started.ChildDeploymentIds.FirstOrDefault();
+            Snackbar.Add($"Queued {(started.ParentDeploymentId is null ? "" : "cascade with ")}{started.ChildDeploymentIds.Count} target row(s).", Severity.Success);
+            Nav.NavigateTo($"/deployment/deployments/{target}");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally { _starting = false; }
+    }
+
+    public sealed record DeployableUnitChoice(Guid Id, string Name, bool IsApplication)
+    {
+        public string Display => IsApplication ? $"App · {Name}" : $"Service · {Name}";
+    }
+}

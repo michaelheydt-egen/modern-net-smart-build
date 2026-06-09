@@ -1,0 +1,167 @@
+@page "/deployment/deployments"
+@inject DeploymentApiClient Api
+@inject NavigationManager Nav
+
+<PageTitle>Deployment — Deployments</PageTitle>
+
+<MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4">
+    <MudText Typo="Typo.h4">Deployments</MudText>
+    <MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-secondary);">
+        recent installs
+    </MudText>
+    <MudSpacer />
+    <MudButton Variant="Variant.Filled"
+               Color="Color.Primary"
+               StartIcon="@Icons.Material.Filled.PlayArrow"
+               OnClick="@(() => Nav.NavigateTo("/deployment/deployments/new"))">
+        Start deployment
+    </MudButton>
+</MudStack>
+
+<MudPaper Elevation="1" Class="pa-4 mb-4">
+    <MudStack Row="true" Spacing="2" Class="mb-3" Wrap="Wrap.Wrap">
+        <MudSelect T="Guid?"
+                   Value="_envFilter"
+                   ValueChanged="OnEnvChanged"
+                   Label="Environment"
+                   Variant="Variant.Outlined"
+                   Margin="Margin.Dense"
+                   Style="max-width: 16rem;">
+            <MudSelectItem T="Guid?" Value="@((Guid?)null)">(any)</MudSelectItem>
+            @foreach (var e in _environments ?? Array.Empty<EnvironmentDto>())
+            {
+                <MudSelectItem T="Guid?" Value="@((Guid?)e.Id)">@e.Name</MudSelectItem>
+            }
+        </MudSelect>
+        <MudSelect T="DeploymentStatusDto?"
+                   Value="_statusFilter"
+                   ValueChanged="OnStatusChanged"
+                   Label="Status"
+                   Variant="Variant.Outlined"
+                   Margin="Margin.Dense"
+                   Style="max-width: 14rem;">
+            <MudSelectItem T="DeploymentStatusDto?" Value="@((DeploymentStatusDto?)null)">(any)</MudSelectItem>
+            @foreach (var s in Enum.GetValues<DeploymentStatusDto>())
+            {
+                <MudSelectItem T="DeploymentStatusDto?" Value="@((DeploymentStatusDto?)s)">@s</MudSelectItem>
+            }
+        </MudSelect>
+        <MudSwitch T="bool"
+                   @bind-Value="_onlyParents"
+                   @bind-Value:after="LoadAsync"
+                   Color="Color.Primary"
+                   Label="Hide cascade children" />
+    </MudStack>
+
+    @if (_error is { Length: > 0 })
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-2">@_error</MudAlert>
+    }
+
+    @if (_loading && _deployments is null)
+    {
+        <MudProgressLinear Indeterminate="true" />
+    }
+    else if (_deployments is { Count: 0 })
+    {
+        <MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-secondary);">
+            No deployments match the current filters.
+        </MudText>
+    }
+    else if (_deployments is not null)
+    {
+        <MudTable Items="@_deployments" T="DeploymentSummaryDto" Dense="true" Hover="true">
+            <HeaderContent>
+                <MudTh Style="width: 7rem;">Status</MudTh>
+                <MudTh>Release</MudTh>
+                <MudTh Style="width: 10rem;">Environment</MudTh>
+                <MudTh Style="width: 9rem;">Target</MudTh>
+                <MudTh Style="width: 7rem;">Trigger</MudTh>
+                <MudTh Style="width: 12rem;">Principal</MudTh>
+                <MudTh Style="width: 11rem;">Started</MudTh>
+                <MudTh Style="width: 4rem;"></MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>
+                    <MudChip T="string" Size="Size.Small"
+                             Color="@StatusColor(context.Status)" Variant="Variant.Filled">
+                        @context.Status
+                    </MudChip>
+                </MudTd>
+                <MudTd>
+                    <MudLink Href="@($"/deployment/releases/{context.ReleaseId}")">
+                        @context.DeployableUnitName <strong>v@context.ReleaseSemanticVersion</strong>
+                    </MudLink>
+                </MudTd>
+                <MudTd>@context.EnvironmentName</MudTd>
+                <MudTd Style="font-family: ui-monospace, monospace; font-size: 0.85em;">
+                    @if (context.TargetId is null)
+                    {
+                        <em>cascade parent</em>
+                    }
+                    else
+                    {
+                        @(context.TargetResourceId ?? context.TargetId!.Value.ToString())
+                    }
+                </MudTd>
+                <MudTd>@context.Trigger</MudTd>
+                <MudTd>@context.TriggeredByPrincipal</MudTd>
+                <MudTd Style="font-size: 0.85em;">
+                    @(context.StartedAtUtc?.ToString("yyyy-MM-dd HH:mm") ?? "—")
+                </MudTd>
+                <MudTd>
+                    <MudIconButton Icon="@Icons.Material.Filled.ArrowForward"
+                                   Size="Size.Small"
+                                   OnClick="@(() => Nav.NavigateTo($"/deployment/deployments/{context.Id}"))" />
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    }
+</MudPaper>
+
+@code {
+    private IReadOnlyList<DeploymentSummaryDto>? _deployments;
+    private IReadOnlyList<EnvironmentDto>? _environments;
+    private Guid? _envFilter;
+    private DeploymentStatusDto? _statusFilter;
+    private bool _onlyParents = true;
+    private bool _loading;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { _environments = await Api.ListEnvironmentsAsync(); }
+        catch (Exception ex) { _error = ex.Message; }
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true; _error = null; StateHasChanged();
+        try
+        {
+            _deployments = await Api.ListDeploymentsAsync(
+                environmentId: _envFilter,
+                status: _statusFilter,
+                onlyParents: _onlyParents,
+                take: 100);
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; StateHasChanged(); }
+    }
+
+    private async Task OnEnvChanged(Guid? id) { _envFilter = id; await LoadAsync(); }
+    private async Task OnStatusChanged(DeploymentStatusDto? s) { _statusFilter = s; await LoadAsync(); }
+
+    private static Color StatusColor(DeploymentStatusDto s) => s switch
+    {
+        DeploymentStatusDto.Queued => Color.Default,
+        DeploymentStatusDto.Running => Color.Info,
+        DeploymentStatusDto.Succeeded => Color.Success,
+        DeploymentStatusDto.Failed => Color.Error,
+        DeploymentStatusDto.Cancelled => Color.Warning,
+        DeploymentStatusDto.RolledBack => Color.Warning,
+        DeploymentStatusDto.HealthChecking => Color.Info,
+        _ => Color.Default,
+    };
+}

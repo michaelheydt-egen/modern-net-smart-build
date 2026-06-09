@@ -1,0 +1,108 @@
+@page "/deployment/environments"
+@inject DeploymentApiClient Api
+@inject NavigationManager Nav
+
+<PageTitle>Deployment — Environments</PageTitle>
+
+<MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4">
+    <MudText Typo="Typo.h4">Environments</MudText>
+    <MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-secondary);">
+        promotion path
+    </MudText>
+    <MudSpacer />
+    <MudButton Variant="Variant.Filled"
+               Color="Color.Primary"
+               StartIcon="@Icons.Material.Filled.Add"
+               OnClick="@(() => Nav.NavigateTo("/deployment/environments/new"))">
+        Register
+    </MudButton>
+</MudStack>
+
+@if (_error is { Length: > 0 })
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="my-2">@_error</MudAlert>
+}
+
+<MudPaper Elevation="1" Class="pa-4 mb-4">
+    @if (_loading && _envs is null)
+    {
+        <MudProgressLinear Indeterminate="true" />
+    }
+    else if (_envs is { Count: 0 })
+    {
+        <MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-secondary);">
+            No environments registered yet.
+        </MudText>
+    }
+    else if (_envs is not null)
+    {
+        <MudTable Items="@_envs" T="EnvironmentDto" Dense="true" Hover="true">
+            <HeaderContent>
+                <MudTh Style="width: 6rem;">Rank</MudTh>
+                <MudTh>Name</MudTh>
+                <MudTh Style="width: 7rem;">Targets</MudTh>
+                <MudTh Style="width: 8rem;">Approval</MudTh>
+                <MudTh Style="width: 8rem;">Production</MudTh>
+                <MudTh Style="width: 7rem;">Freeze</MudTh>
+                <MudTh Style="width: 5rem; text-align: right;"></MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd Style="font-family: ui-monospace, monospace;">@context.PromotionRank</MudTd>
+                <MudTd>
+                    <MudLink Href="@($"/deployment/environments/{context.Id}")">@context.Name</MudLink>
+                </MudTd>
+                <MudTd>
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@context.Targets.Count</MudChip>
+                </MudTd>
+                <MudTd>
+                    @if (context.RequiresApproval)
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined">required</MudChip>
+                    }
+                    else
+                    {
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">none</MudChip>
+                    }
+                </MudTd>
+                <MudTd>
+                    @if (context.IsProduction)
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Filled">prod</MudChip>
+                    }
+                </MudTd>
+                <MudTd>
+                    @if (context.FreezeWindows.Count > 0)
+                    {
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">
+                            @context.FreezeWindows.Count
+                        </MudChip>
+                    }
+                </MudTd>
+                <MudTd Style="text-align: right;">
+                    <MudIconButton Icon="@Icons.Material.Filled.Edit"
+                                   Size="Size.Small"
+                                   OnClick="@(() => Nav.NavigateTo($"/deployment/environments/{context.Id}"))" />
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    }
+</MudPaper>
+
+@code {
+    private IReadOnlyList<EnvironmentDto>? _envs;
+    private bool _loading;
+    private string? _error;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true; _error = null; StateHasChanged();
+        try
+        {
+            _envs = await Api.ListEnvironmentsAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; StateHasChanged(); }
+    }
+}

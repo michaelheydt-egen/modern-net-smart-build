@@ -8,7 +8,7 @@ Runtime architecture and CI/CD operations flow for the cicd workspace. Diagrams 
 graph TB
     User[("👤 Operator<br/>(browser)")]
 
-    subgraph WebUI["Jenkins.WebUI · Blazor Server · :8080"]
+    subgraph WebUI["cicd.web.admin · Blazor Server · :8080"]
         Pages["Pages<br/>Orchestrator · Pipelines<br/>Nuget · Docker · Google"]
         Health["JenkinsHealthService<br/>(BackgroundService)"]
         Runner["PipelineRunner<br/>(singleton · in-mem ring buf)"]
@@ -96,7 +96,7 @@ The chain is logically a DAG (the two `nexus-*` publishes share `cicd-build` as 
 
 | Concern | Project |
 | --- | --- |
-| Blazor UI, pages, layout | `src/jenkins/Jenkins.WebUI` |
+| Blazor UI, pages, layout | `src/web-admin/cicd.web.admin` |
 | Jenkins HTTP client | `src/jenkins/Jenkins.Client` |
 | Pipeline orchestration | `src/jenkins/Jenkins.Orchestrator` (+ `.Abstractions`) |
 | Jenkinsfiles | `jenkins/build/`, `jenkins/publish/nexus/{nuget,docker}/`, `jenkins/publish/gcp/{gar,gcr}/` |

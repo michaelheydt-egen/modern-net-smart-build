@@ -1,0 +1,110 @@
+@*
+    Attach the six supply-chain provenance fields to a release. Re-submitting
+    overwrites the existing value (the publish pipeline owns this field, so
+    overwriting is the right call when a re-scan produces fresh artifacts).
+*@
+
+<MudDialog>
+    <DialogContent>
+        <MudStack Spacing="3" Style="min-width: 540px;">
+            @if (Existing is not null)
+            {
+                <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">
+                    Provenance is already attached. Submitting will overwrite the existing values.
+                </MudAlert>
+            }
+            <MudTextField @bind-Value="_sha256"
+                          Label="Artifact SHA-256"
+                          Variant="Variant.Outlined"
+                          Required="true"
+                          MaxLength="128"
+                          HelperText="Hex digest of the artifact at publish time." />
+            <MudTextField @bind-Value="_sbomUri"
+                          Label="SBOM URI"
+                          Variant="Variant.Outlined"
+                          Required="true"
+                          MaxLength="500"
+                          HelperText="e.g. https://nexus/repository/sboms/billing-api-1.2.3/bom-vex.json" />
+            <MudTextField @bind-Value="_vulnUri"
+                          Label="Vulnerability report URI"
+                          Variant="Variant.Outlined"
+                          Required="true"
+                          MaxLength="500"
+                          HelperText="e.g. .../vulnerabilities.json (Trivy / Grype output)" />
+            <MudTextField @bind-Value="_ciUrl"
+                          Label="CI run URL"
+                          Variant="Variant.Outlined"
+                          Required="true"
+                          MaxLength="500"
+                          HelperText="Clickable — e.g. http://jenkins:8080/job/cicd-build/42/" />
+            <MudTextField @bind-Value="_ciId"
+                          Label="CI run id"
+                          Variant="Variant.Outlined"
+                          Required="true"
+                          MaxLength="200"
+                          HelperText="Programmatic — e.g. cicd-build/#42" />
+            <MudTextField @bind-Value="_principal"
+                          Label="Published by (principal)"
+                          Variant="Variant.Outlined"
+                          Required="true"
+                          MaxLength="200"
+                          HelperText="Build identity — often a system account." />
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary"
+                   Variant="Variant.Filled"
+                   StartIcon="@Icons.Material.Filled.VerifiedUser"
+                   OnClick="Submit"
+                   Disabled="@(!CanSubmit())">
+            @(Existing is null ? "Attach" : "Overwrite")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public ProvenanceDto? Existing { get; set; }
+
+    private string _sha256 = "";
+    private string _sbomUri = "";
+    private string _vulnUri = "";
+    private string _ciUrl = "";
+    private string _ciId = "";
+    private string _principal = "";
+
+    protected override void OnInitialized()
+    {
+        if (Existing is null) return;
+        _sha256 = Existing.ArtifactSha256;
+        _sbomUri = Existing.SbomUri;
+        _vulnUri = Existing.VulnerabilityReportUri;
+        _ciUrl = Existing.CiRunUrl;
+        _ciId = Existing.CiRunId;
+        _principal = Existing.PublishedByPrincipal;
+    }
+
+    private bool CanSubmit() =>
+        !string.IsNullOrWhiteSpace(_sha256)
+        && !string.IsNullOrWhiteSpace(_sbomUri)
+        && !string.IsNullOrWhiteSpace(_vulnUri)
+        && !string.IsNullOrWhiteSpace(_ciUrl)
+        && !string.IsNullOrWhiteSpace(_ciId)
+        && !string.IsNullOrWhiteSpace(_principal);
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private void Submit() => MudDialog.Close(DialogResult.Ok(new Result(
+        _sha256.Trim(), _sbomUri.Trim(), _vulnUri.Trim(),
+        _ciUrl.Trim(), _ciId.Trim(), _principal.Trim())));
+
+    public sealed record Result(
+        string ArtifactSha256,
+        string SbomUri,
+        string VulnerabilityReportUri,
+        string CiRunUrl,
+        string CiRunId,
+        string PublishedByPrincipal);
+}

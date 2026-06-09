@@ -76,6 +76,23 @@
         "isDefault": true
       },
       "problemMatcher": []
+    },
+    {
+      "label": "build-admin",
+      "type": "process",
+      "command": "dotnet",
+      "args": [
+        "build",
+        "${workspaceFolder}/src/web-admin/cicd.web.admin/cicd.web.admin.csproj",
+        "/property:GenerateFullPaths=true",
+        "/consoleloggerparameters:NoSummary"
+      ],
+      "group": "build",
+      "problemMatcher": "$msCompile",
+      "presentation": {
+        "reveal": "silent",
+        "panel": "dedicated"
+      }
     }
   ]
 }

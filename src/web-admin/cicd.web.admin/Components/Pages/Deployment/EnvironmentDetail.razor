@@ -1,0 +1,485 @@
+@page "/deployment/environments/{Id}"
+@inject DeploymentApiClient Api
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+@inject IDialogService DialogService
+
+<PageTitle>Deployment — Environment @_dto?.Name</PageTitle>
+
+<MudBreadcrumbs Items="@_crumbs" Class="mb-2" />
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" />
+}
+else if (_error is { Length: > 0 })
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="my-2">@_error</MudAlert>
+}
+else if (_isNew)
+{
+    <MudText Typo="Typo.h4" Class="mb-3">Register a new environment</MudText>
+    <MudPaper Elevation="1" Class="pa-4" Style="max-width: 720px;">
+        <MudStack Spacing="3">
+            <MudTextField @bind-Value="_newName"
+                          Label="Name"
+                          Variant="Variant.Outlined"
+                          Required="true"
+                          MaxLength="100"
+                          HelperText="e.g. Dev, Test, Staging, Prod, Prod-GCP" />
+            <MudNumericField T="int"
+                             @bind-Value="_newRank"
+                             Label="Promotion rank"
+                             Variant="Variant.Outlined"
+                             Min="0"
+                             Step="1"
+                             HelperText="Lower runs earlier in the promotion path (Dev=1 → Prod=4)." />
+            <MudCheckBox T="bool" @bind-Value="_newRequiresApproval"
+                         Label="Requires approval"
+                         Color="Color.Primary" />
+            <MudCheckBox T="bool" @bind-Value="_newIsProduction"
+                         Label="Is production"
+                         Color="Color.Error" />
+            <MudStack Row="true" Spacing="2">
+                <MudButton Variant="Variant.Filled"
+                           Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.Save"
+                           OnClick="RegisterAsync"
+                           Disabled="@_saving">Register</MudButton>
+                <MudButton Variant="Variant.Text"
+                           OnClick="@(() => Nav.NavigateTo("/deployment/environments"))">Cancel</MudButton>
+            </MudStack>
+        </MudStack>
+    </MudPaper>
+}
+else if (_dto is not null)
+{
+    <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3">
+        <MudText Typo="Typo.h4">@_dto.Name</MudText>
+        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">rank @_dto.PromotionRank</MudChip>
+        @if (_dto.IsProduction)
+        {
+            <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Filled">prod</MudChip>
+        }
+        @if (_dto.RequiresApproval)
+        {
+            <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined">approval required</MudChip>
+        }
+    </MudStack>
+
+    <MudGrid>
+        <MudItem xs="12" md="6">
+            <MudPaper Elevation="1" Class="pa-4 mb-4">
+                <MudText Typo="Typo.h6" Class="mb-3">Identity</MudText>
+                <MudTextField @bind-Value="_renameName"
+                              Label="Name"
+                              Variant="Variant.Outlined"
+                              MaxLength="100" />
+                <MudButton Class="mt-2"
+                           Variant="Variant.Filled"
+                           Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.Save"
+                           OnClick="RenameAsync"
+                           Disabled="@(_saving || string.Equals(_renameName, _dto.Name, StringComparison.Ordinal))">
+                    Save name
+                </MudButton>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" md="6">
+            <MudPaper Elevation="1" Class="pa-4 mb-4">
+                <MudText Typo="Typo.h6" Class="mb-3">Settings</MudText>
+                <MudNumericField T="int"
+                                 @bind-Value="_rank"
+                                 Label="Promotion rank"
+                                 Variant="Variant.Outlined"
+                                 Min="0"
+                                 Step="1" />
+                <MudButton Class="mt-2 mb-3"
+                           Variant="Variant.Filled"
+                           Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.Save"
+                           OnClick="ChangeRankAsync"
+                           Disabled="@(_saving || _rank == _dto.PromotionRank)">
+                    Save rank
+                </MudButton>
+                <MudSwitch T="bool"
+                           @bind-Value="_requiresApproval"
+                           @bind-Value:after="ApprovalChangedAsync"
+                           Color="Color.Primary"
+                           Label="Requires approval" />
+                <MudSwitch T="bool"
+                           @bind-Value="_isProduction"
+                           @bind-Value:after="ProductionChangedAsync"
+                           Color="Color.Error"
+                           Label="Is production" />
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12">
+            <MudPaper Elevation="1" Class="pa-4 mb-4">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3">
+                    <MudText Typo="Typo.h6">Targets</MudText>
+                    <MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-secondary);">
+                        where services physically run
+                    </MudText>
+                    <MudSpacer />
+                    <MudButton Variant="Variant.Filled"
+                               Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.Add"
+                               OnClick="OpenAddTargetDialog">Add target</MudButton>
+                </MudStack>
+                @if (_dto.Targets.Count == 0)
+                {
+                    <MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-secondary);">
+                        No targets configured. Add at least one before deploying into this environment.
+                    </MudText>
+                }
+                else
+                {
+                    <MudTable Items="@_dto.Targets" T="DeploymentTargetDto" Dense="true" Hover="true">
+                        <HeaderContent>
+                            <MudTh Style="width: 11rem;">Kind</MudTh>
+                            <MudTh>Resource id</MudTh>
+                            <MudTh Style="width: 9rem;">Region</MudTh>
+                            <MudTh Style="width: 7rem;">Slot</MudTh>
+                            <MudTh Style="width: 7rem; text-align: right;"></MudTh>
+                        </HeaderContent>
+                        <RowTemplate>
+                            <MudTd>
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">
+                                    @KindLabel(context.TargetKind)
+                                </MudChip>
+                            </MudTd>
+                            <MudTd Style="font-family: ui-monospace, monospace; font-size: 0.85em;">
+                                @context.ResourceId
+                            </MudTd>
+                            <MudTd Style="font-family: ui-monospace, monospace;">@context.Region</MudTd>
+                            <MudTd>@(context.Slot ?? "—")</MudTd>
+                            <MudTd Style="text-align: right; white-space: nowrap;">
+                                <MudTooltip Text="Edit">
+                                    <MudIconButton Icon="@Icons.Material.Filled.Edit"
+                                                   Size="Size.Small"
+                                                   OnClick="@(() => OpenEditTargetDialog(context))" />
+                                </MudTooltip>
+                                <MudTooltip Text="Remove">
+                                    <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                                   Size="Size.Small"
+                                                   Color="Color.Error"
+                                                   OnClick="@(() => RemoveTargetAsync(context))" />
+                                </MudTooltip>
+                            </MudTd>
+                        </RowTemplate>
+                    </MudTable>
+                }
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12">
+            <MudPaper Elevation="1" Class="pa-4 mb-4">
+                <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3">
+                    <MudText Typo="Typo.h6">Freeze windows</MudText>
+                    <MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-secondary);">
+                        no-deploy ranges (soft-policed via OverrideFreezeReason)
+                    </MudText>
+                    <MudSpacer />
+                    <MudButton Variant="Variant.Filled"
+                               Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.AcUnit"
+                               OnClick="OpenScheduleFreezeDialog">Schedule</MudButton>
+                </MudStack>
+                @if (_dto.FreezeWindows.Count == 0)
+                {
+                    <MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-secondary);">
+                        No freeze windows scheduled.
+                    </MudText>
+                }
+                else
+                {
+                    <MudTable Items="@_dto.FreezeWindows" T="EnvironmentFreezeWindowDto" Dense="true" Hover="true">
+                        <HeaderContent>
+                            <MudTh Style="width: 13rem;">Start (UTC)</MudTh>
+                            <MudTh Style="width: 13rem;">End (UTC)</MudTh>
+                            <MudTh>Reason</MudTh>
+                            <MudTh Style="width: 12rem;">Created by</MudTh>
+                            <MudTh Style="width: 5rem; text-align: right;"></MudTh>
+                        </HeaderContent>
+                        <RowTemplate>
+                            <MudTd Style="font-family: ui-monospace, monospace; font-size: 0.85em;">
+                                @context.StartUtc.ToString("yyyy-MM-dd HH:mm")
+                            </MudTd>
+                            <MudTd Style="font-family: ui-monospace, monospace; font-size: 0.85em;">
+                                @context.EndUtc.ToString("yyyy-MM-dd HH:mm")
+                            </MudTd>
+                            <MudTd>@context.Reason</MudTd>
+                            <MudTd>@context.CreatedByPrincipal</MudTd>
+                            <MudTd Style="text-align: right;">
+                                <MudTooltip Text="Cancel">
+                                    <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                                   Size="Size.Small"
+                                                   Color="Color.Error"
+                                                   OnClick="@(() => CancelFreezeAsync(context))" />
+                                </MudTooltip>
+                            </MudTd>
+                        </RowTemplate>
+                    </MudTable>
+                }
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12">
+            <MudPaper Elevation="1" Class="pa-4">
+                <MudText Typo="Typo.h6" Class="mb-2">Metadata</MudText>
+                <DetailRow Label="Environment id" Value="@_dto.Id.ToString()" Mono="true" />
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+}
+
+@code {
+    [Parameter] public string? Id { get; set; }
+
+    private EnvironmentDto? _dto;
+    private bool _isNew;
+    private bool _loading;
+    private bool _saving;
+    private string? _error;
+
+    // Register-mode form state
+    private string _newName = "";
+    private int _newRank = 1;
+    private bool _newRequiresApproval;
+    private bool _newIsProduction;
+
+    // Edit-mode scalar state
+    private string _renameName = "";
+    private int _rank;
+    private bool _requiresApproval;
+    private bool _isProduction;
+
+    private List<BreadcrumbItem> _crumbs = new();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _isNew = string.Equals(Id, "new", StringComparison.OrdinalIgnoreCase);
+        _crumbs = new()
+        {
+            new BreadcrumbItem("Environments", "/deployment/environments"),
+            new BreadcrumbItem(_isNew ? "New" : (_dto?.Name ?? "Detail"), href: null, disabled: true),
+        };
+        if (_isNew) return;
+        if (Guid.TryParse(Id, out var id)) await LoadAsync(id);
+        else _error = "Invalid environment id.";
+    }
+
+    private async Task LoadAsync(Guid id)
+    {
+        _loading = true; _error = null;
+        try
+        {
+            _dto = await Api.GetEnvironmentAsync(id);
+            if (_dto is null)
+            {
+                _error = $"Environment {id} not found.";
+                return;
+            }
+            _renameName = _dto.Name;
+            _rank = _dto.PromotionRank;
+            _requiresApproval = _dto.RequiresApproval;
+            _isProduction = _dto.IsProduction;
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private async Task RegisterAsync()
+    {
+        _saving = true;
+        try
+        {
+            var created = await Api.RegisterEnvironmentAsync(new RegisterEnvironmentRequest(
+                _newName.Trim(), _newRank, _newRequiresApproval, _newIsProduction));
+            Snackbar.Add($"Registered '{created.Name}'.", Severity.Success);
+            Nav.NavigateTo($"/deployment/environments/{created.Id}");
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        finally { _saving = false; }
+    }
+
+    private async Task RenameAsync()
+    {
+        if (_dto is null) return;
+        _saving = true;
+        try
+        {
+            await Api.RenameEnvironmentAsync(_dto.Id, new RenameEnvironmentRequest(_renameName.Trim()));
+            Snackbar.Add("Renamed.", Severity.Success);
+            await LoadAsync(_dto.Id);
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        finally { _saving = false; }
+    }
+
+    private async Task ChangeRankAsync()
+    {
+        if (_dto is null) return;
+        _saving = true;
+        try
+        {
+            await Api.ChangePromotionRankAsync(_dto.Id, new ChangePromotionRankRequest(_rank));
+            Snackbar.Add("Rank updated.", Severity.Success);
+            await LoadAsync(_dto.Id);
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        finally { _saving = false; }
+    }
+
+    // Toggles save inline rather than via a Save button to match the switch UX.
+    private async Task ApprovalChangedAsync()
+    {
+        if (_dto is null || _requiresApproval == _dto.RequiresApproval) return;
+        try
+        {
+            await Api.SetApprovalRequirementAsync(_dto.Id, new SetApprovalRequirementRequest(_requiresApproval));
+            Snackbar.Add($"Approval requirement {(_requiresApproval ? "enabled" : "disabled")}.", Severity.Success);
+            await LoadAsync(_dto.Id);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+            _requiresApproval = _dto.RequiresApproval; // revert toggle on failure
+        }
+    }
+
+    private async Task ProductionChangedAsync()
+    {
+        if (_dto is null || _isProduction == _dto.IsProduction) return;
+        try
+        {
+            await Api.SetProductionFlagAsync(_dto.Id, new SetProductionFlagRequest(_isProduction));
+            Snackbar.Add($"Production flag {(_isProduction ? "set" : "cleared")}.", Severity.Success);
+            await LoadAsync(_dto.Id);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+            _isProduction = _dto.IsProduction;
+        }
+    }
+
+    private async Task OpenAddTargetDialog()
+    {
+        if (_dto is null) return;
+        var parameters = new DialogParameters { ["IsEdit"] = false };
+        var dlg = await DialogService.ShowAsync<TargetEditorDialog>("Add target", parameters);
+        var result = await dlg.Result;
+        if (result is null || result.Canceled || result.Data is not TargetEditorDialog.Result data) return;
+
+        try
+        {
+            await Api.AddTargetAsync(_dto.Id, new AddTargetRequest(
+                data.TargetKind, data.ResourceId, data.Region, data.Slot));
+            Snackbar.Add("Target added.", Severity.Success);
+            await LoadAsync(_dto.Id);
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+
+    private async Task OpenEditTargetDialog(DeploymentTargetDto target)
+    {
+        if (_dto is null) return;
+        var parameters = new DialogParameters
+        {
+            ["IsEdit"] = true,
+            ["Existing"] = target,
+        };
+        var dlg = await DialogService.ShowAsync<TargetEditorDialog>(
+            $"Edit target ({target.Region})", parameters);
+        var result = await dlg.Result;
+        if (result is null || result.Canceled || result.Data is not TargetEditorDialog.Result data) return;
+
+        try
+        {
+            await Api.UpdateTargetAsync(_dto.Id, target.Id, new UpdateTargetRequest(
+                data.TargetKind, data.ResourceId, data.Region, data.Slot));
+            Snackbar.Add("Target updated.", Severity.Success);
+            await LoadAsync(_dto.Id);
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+
+    private async Task RemoveTargetAsync(DeploymentTargetDto target)
+    {
+        if (_dto is null) return;
+        var parameters = new DialogParameters
+        {
+            ["Message"] = $"Remove target '{target.ResourceId}' from '{_dto.Name}'?",
+            ["Items"] = (IReadOnlyList<string>)new[]
+            {
+                $"{KindLabel(target.TargetKind)} in {target.Region} — {target.ResourceId}",
+            },
+        };
+        var dlg = await DialogService.ShowAsync<ConfirmDeleteDialog>("Remove target", parameters);
+        var result = await dlg.Result;
+        if (result is null || result.Canceled || result.Data is not true) return;
+
+        try
+        {
+            await Api.RemoveTargetAsync(_dto.Id, target.Id);
+            Snackbar.Add("Removed.", Severity.Success);
+            await LoadAsync(_dto.Id);
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+
+    private async Task OpenScheduleFreezeDialog()
+    {
+        if (_dto is null) return;
+        var dlg = await DialogService.ShowAsync<FreezeWindowDialog>("Schedule freeze window");
+        var result = await dlg.Result;
+        if (result is null || result.Canceled || result.Data is not FreezeWindowDialog.Result data) return;
+
+        try
+        {
+            await Api.ScheduleFreezeWindowAsync(_dto.Id, new ScheduleFreezeWindowRequest(
+                data.StartUtc, data.EndUtc, data.Reason, data.CreatedByPrincipal));
+            Snackbar.Add("Freeze window scheduled.", Severity.Success);
+            await LoadAsync(_dto.Id);
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+
+    private async Task CancelFreezeAsync(EnvironmentFreezeWindowDto window)
+    {
+        if (_dto is null) return;
+        var parameters = new DialogParameters
+        {
+            ["Message"] = $"Cancel this freeze window?",
+            ["Items"] = (IReadOnlyList<string>)new[]
+            {
+                $"{window.StartUtc:yyyy-MM-dd HH:mm} → {window.EndUtc:yyyy-MM-dd HH:mm} UTC — {window.Reason}",
+            },
+        };
+        var dlg = await DialogService.ShowAsync<ConfirmDeleteDialog>("Cancel freeze window", parameters);
+        var result = await dlg.Result;
+        if (result is null || result.Canceled || result.Data is not true) return;
+
+        try
+        {
+            await Api.CancelFreezeWindowAsync(_dto.Id, window.Id);
+            Snackbar.Add("Freeze window cancelled.", Severity.Success);
+            await LoadAsync(_dto.Id);
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+
+    private static string KindLabel(TargetKindDto k) => k switch
+    {
+        TargetKindDto.IIS => "IIS",
+        TargetKindDto.AzureAppService => "Azure App Service",
+        TargetKindDto.KubernetesCluster => "Kubernetes",
+        TargetKindDto.ContainerApp => "Azure Container Apps",
+        TargetKindDto.VM => "VM",
+        TargetKindDto.GoogleCloudRun => "Google Cloud Run",
+        _ => k.ToString(),
+    };
+}

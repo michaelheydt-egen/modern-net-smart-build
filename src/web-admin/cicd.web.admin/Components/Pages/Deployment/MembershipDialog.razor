@@ -1,0 +1,91 @@
+@*
+    Add / edit a single ApplicationService membership row. Both paths share this
+    component: the Add path takes a Services list to pick from; the Edit path
+    takes the existing row and locks the Service field.
+*@
+
+<MudDialog>
+    <DialogContent>
+        <MudStack Spacing="3" Style="min-width: 420px;">
+            @if (IsEdit && Existing is not null)
+            {
+                <MudTextField Value="@Existing.ServiceName"
+                              Label="Service"
+                              Variant="Variant.Outlined"
+                              ReadOnly="true" />
+            }
+            else
+            {
+                <MudSelect T="Guid"
+                           @bind-Value="_serviceId"
+                           Label="Service"
+                           Variant="Variant.Outlined"
+                           Required="true">
+                    @foreach (var s in Services ?? Array.Empty<ServiceDto>())
+                    {
+                        <MudSelectItem Value="@s.Id">@s.Name (@s.Kind)</MudSelectItem>
+                    }
+                </MudSelect>
+            }
+            <MudTextField @bind-Value="_role"
+                          Label="Role"
+                          Variant="Variant.Outlined"
+                          Required="true"
+                          MaxLength="100"
+                          HelperText="Free-form label — e.g. 'api', 'worker', 'scheduler'." />
+            <MudNumericField T="int"
+                             @bind-Value="_order"
+                             Label="Deployment order"
+                             Variant="Variant.Outlined"
+                             Min="0"
+                             Step="10"
+                             HelperText="Lower runs first; ties run in parallel." />
+            <MudCheckBox T="bool"
+                         @bind-Value="_isOptional"
+                         Label="Optional member"
+                         Color="Color.Primary" />
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary"
+                   Variant="Variant.Filled"
+                   OnClick="Submit"
+                   Disabled="@(!CanSubmit())">
+            @(IsEdit ? "Save" : "Add")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public bool IsEdit { get; set; }
+    [Parameter] public IReadOnlyList<ServiceDto>? Services { get; set; }
+    [Parameter] public ApplicationServiceMemberDto? Existing { get; set; }
+
+    private Guid _serviceId;
+    private string _role = "";
+    private int _order = 100;
+    private bool _isOptional;
+
+    protected override void OnParametersSet()
+    {
+        if (IsEdit && Existing is not null)
+        {
+            _serviceId = Existing.ServiceId;
+            _role = Existing.Role;
+            _order = Existing.DeploymentOrder;
+            _isOptional = Existing.IsOptional;
+        }
+    }
+
+    private bool CanSubmit() => (IsEdit || _serviceId != Guid.Empty) && !string.IsNullOrWhiteSpace(_role);
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private void Submit() =>
+        MudDialog.Close(DialogResult.Ok(new Result(_serviceId, _role.Trim(), _isOptional, _order)));
+
+    public sealed record Result(Guid ServiceId, string Role, bool IsOptional, int DeploymentOrder);
+}

@@ -6,7 +6,7 @@
 - retains build history past Jenkins's `logRotator` policy
 - can survive Jenkins restarts / reachability blips with cached state
 
-It is **off by default**. The WebUI ships in live-Jenkins mode — every call goes straight through to Jenkins via [JenkinsLiveBuildStore](../src/jenkins/Jenkins.WebUI/Services/Builds/JenkinsLiveBuildStore.cs). Flip the switch in config when you want the persistence.
+It is **off by default**. The WebUI ships in live-Jenkins mode — every call goes straight through to Jenkins via [JenkinsLiveBuildStore](../src/web-admin/cicd.web.admin/Services/Builds/JenkinsLiveBuildStore.cs). Flip the switch in config when you want the persistence.
 
 ## Enabling
 
@@ -30,7 +30,7 @@ On startup with `Enabled=true`:
 
 1. The DB path's parent directory is created if it doesn't exist.
 2. Pending EF Core migrations are applied (`db.Database.MigrateAsync()`).
-3. [BuildSyncService](../src/jenkins/Jenkins.WebUI/Services/Builds/BuildSyncService.cs) kicks off and runs forever as a `BackgroundService`. First tick is immediate (so the UI is populated within seconds); subsequent ticks honor `PollIntervalSeconds`.
+3. [BuildSyncService](../src/web-admin/cicd.web.admin/Services/Builds/BuildSyncService.cs) kicks off and runs forever as a `BackgroundService`. First tick is immediate (so the UI is populated within seconds); subsequent ticks honor `PollIntervalSeconds`.
 
 ## Docker compose — bind mount
 
@@ -38,13 +38,13 @@ The DB file is in-process / file-based, so the container needs read+write access
 
 ```yaml
 services:
-  jenkins-webui:
-    image: jenkins-webui:latest
+  cicd-web-admin:
+    image: cicd-web-admin:latest
     environment:
       - BuildSync__Enabled=true
       - BuildSync__DbPath=/data/builds.db
     volumes:
-      - ./jenkins-webui-data:/data    # host dir → /data inside container
+      - ./cicd-web-admin-data:/data    # host dir → /data inside container
     ports:
       - "8080:8080"
 ```
@@ -53,7 +53,7 @@ Why a bind mount over a named volume: easier to back up, `sqlite3` inspection on
 
 ## Schema
 
-One table, intentionally denormalized — causes / artifacts / build-info.json live as JSON columns. See [BuildRunRecord.cs](../src/jenkins/Jenkins.WebUI/Services/Builds/BuildRunRecord.cs).
+One table, intentionally denormalized — causes / artifacts / build-info.json live as JSON columns. See [BuildRunRecord.cs](../src/web-admin/cicd.web.admin/Services/Builds/BuildRunRecord.cs).
 
 ```text
 BuildRuns
@@ -89,7 +89,7 @@ First tick for a job uses `BackfillCount` instead of `PerJobFetchCount` so a fre
 
 ### Live fallback
 
-Even with sync on, the [SqliteBuildStore](../src/jenkins/Jenkins.WebUI/Services/Builds/SqliteBuildStore.cs) falls back to a direct Jenkins read when a requested build isn't in the DB yet (e.g. someone clicks into a build that just landed and the sync hasn't picked it up). No UX regression vs live mode.
+Even with sync on, the [SqliteBuildStore](../src/web-admin/cicd.web.admin/Services/Builds/SqliteBuildStore.cs) falls back to a direct Jenkins read when a requested build isn't in the DB yet (e.g. someone clicks into a build that just landed and the sync hasn't picked it up). No UX regression vs live mode.
 
 ## Adding more jobs to the mirror
 
@@ -101,7 +101,7 @@ Touch `BuildRunRecord` (entity) and `BuildSyncDbContext.OnModelCreating` (only i
 
 ```bash
 dotnet ef migrations add <Name> \
-  --project src/jenkins/Jenkins.WebUI/Jenkins.WebUI.csproj \
+  --project src/web-admin/cicd.web.admin/cicd.web.admin.csproj \
   --output-dir Services/Builds/Migrations
 ```
 
@@ -110,7 +110,7 @@ On the next deploy the WebUI applies the migration at startup.
 ## Inspecting the DB
 
 ```bash
-sqlite3 ./jenkins-webui-data/builds.db
+sqlite3 ./cicd-web-admin-data/builds.db
 sqlite> SELECT JobName, COUNT(*) FROM BuildRuns GROUP BY JobName;
 sqlite> SELECT Number, Result, Description FROM BuildRuns
         WHERE JobName='cicd-build' ORDER BY Number DESC LIMIT 10;

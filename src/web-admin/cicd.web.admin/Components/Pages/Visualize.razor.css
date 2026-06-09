@@ -1,0 +1,247 @@
+/* Visualize page styles. Same terminal-dark monospace pane as the SBOM viewer,
+   slightly taller because this page is dedicated to a single document and we
+   don't have a build picker + analysis panels competing for vertical space. */
+
+.visualize-pane {
+    background: #1e1e1e;
+    color: #d4d4d4;
+    border-radius: 4px;
+    padding: 0.75rem 1rem;
+    font-family: ui-monospace, monospace;
+    font-size: 0.85rem;
+    line-height: 1.4;
+    max-height: 720px;
+    overflow: auto;
+    white-space: pre;
+    margin: 0;
+    word-break: normal;
+}
+
+/* Specificity-winning override so Prism's pre[class*="language-"] doesn't
+   steal our height + margin. Same trick used on other pages with Prism. */
+pre.visualize-pane[class*="language-"] {
+    max-height: 720px;
+    overflow: auto;
+    margin: 0;
+}
+
+/* Container for the D3 dependency-graph SVG. The SVG itself sets its width
+   to 100% + a fixed height (see sbom-graph.js); this wrapper just constrains
+   width to the parent panel and gives the SVG a place to mount. The dark
+   background is also set on the SVG so the canvas keeps its color even
+   before the simulation paints the first tick. */
+.visualize-graph-pane {
+    width: 100%;
+    /* Fixed initial dimensions so the resize handle has somewhere to start from.
+       The min-* values keep a usable graph visible if the user shrinks hard;
+       max-height caps the runaway-drag failure mode. */
+    height: 600px;
+    min-width: 300px;
+    min-height: 400px;
+    max-height: 1200px;
+    display: block;
+    background: #1a1a1a;
+    border-radius: 4px;
+    /* Native vertical drag handle. Width is now controlled by the parent panel
+       (MainLayout's MudContainer is MaxWidth.False, so the graph already
+       expands horizontally with the browser) — only the height needs manual
+       adjustment. `overflow: hidden` is still required for the browser to
+       render the handle. */
+    resize: vertical;
+    overflow: hidden;
+    /* The hover-card overlay anchors against this container. */
+    position: relative;
+}
+
+/* ---------- Hover card overlay ----------
+   Vertical info panel anchored to one edge of the graph container while the
+   user hovers a node. `pointer-events: none` so it never steals clicks from
+   the graph beneath it (we want users to be able to click the node they're
+   hovering, even if the cursor crosses the panel's footprint on its way).
+   z-index: 10 keeps it above the SVG D3 appends as a sibling. */
+.hover-card {
+    position: absolute;
+    top: 8px;
+    bottom: 8px;
+    width: 280px;
+    background: rgba(26, 26, 26, 0.94);
+    color: #d4d4d4;
+    border: 1px solid #333;
+    border-radius: 4px;
+    padding: 0.85rem 0.9rem;
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5);
+    z-index: 10;
+    pointer-events: none;
+    overflow-y: auto;
+    font-size: 0.85em;
+    line-height: 1.4;
+}
+
+.hover-card.left  { left:  8px; }
+.hover-card.right { right: 8px; }
+
+/* Pinned visual cue — left/right accent bar in amber so it reads as "this is
+   sticky, not going away on mouseout". Pairs with the PushPin icon next to
+   the component name. */
+.hover-card.pinned {
+    border-color: #facc15;
+}
+.hover-card.pinned.left  { border-left-width:  3px; }
+.hover-card.pinned.right { border-right-width: 3px; }
+
+/* Title needs right padding when the X close button is present, so a long
+   component name doesn't run under it. */
+.hover-card.pinned .hover-card-name {
+    padding-right: 26px;
+}
+
+/* Close (X) button in the top-right corner. The hover-card itself has
+   pointer-events: none so the SVG underneath stays clickable; this button
+   needs to flip it back on, otherwise the close click would pass through. */
+.hover-card-close {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 22px;
+    height: 22px;
+    background: transparent;
+    color: #aaaaaa;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    line-height: 1;
+    padding: 0;
+    pointer-events: auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 80ms ease-out, color 80ms ease-out;
+}
+
+.hover-card-close:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #ffffff;
+    border-color: #555;
+}
+
+/* PushPin icon alongside the title is also clickable — same handler as the X.
+   Same pointer-events flip so the click registers. */
+.hover-card-pin-toggle {
+    pointer-events: auto;
+    cursor: pointer;
+    display: inline-block;
+    transition: opacity 80ms ease-out;
+}
+
+.hover-card-pin-toggle:hover {
+    opacity: 0.7;
+}
+
+.hover-card-name {
+    font-size: 1.05em;
+    font-weight: 600;
+    word-break: break-all;
+    margin-bottom: 0.1rem;
+    color: #ffffff;
+}
+
+.hover-card-version {
+    font-family: ui-monospace, monospace;
+    color: #aaaaaa;
+    font-size: 0.85em;
+    margin-bottom: 0.5rem;
+    word-break: break-all;
+}
+
+.hover-card-row {
+    display: flex;
+    gap: 0.35rem;
+    flex-wrap: wrap;
+    margin: 0.3rem 0;
+}
+
+.hover-card-section {
+    margin-top: 0.7rem;
+    padding-top: 0.55rem;
+    border-top: 1px solid #333333;
+}
+
+.hover-card-section-title {
+    font-size: 0.7em;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #888888;
+    margin-bottom: 0.3rem;
+}
+
+.hover-card-stats {
+    font-size: 0.85em;
+    color: #bbbbbb;
+    margin-bottom: 0.15rem;
+}
+
+.hover-card-stats span + span { margin-left: 0.35rem; }
+
+.hover-card-vuln,
+.hover-card-dep {
+    font-family: ui-monospace, monospace;
+    font-size: 0.78em;
+    padding: 0.18rem 0;
+    color: #cccccc;
+    word-break: break-all;
+}
+
+.hover-card-more {
+    font-size: 0.78em;
+    color: #888888;
+    font-style: italic;
+    padding: 0.18rem 0;
+}
+
+.hover-card-footer {
+    margin-top: 0.7rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid #333333;
+    font-size: 0.7em;
+    color: #777777;
+    word-break: break-all;
+}
+
+/* When the container goes into Browser Fullscreen, fill the entire viewport.
+   The SVG inside already uses width/height 100%, so it follows; the
+   ResizeObserver picks up the size change and reflows the simulation. */
+.visualize-graph-pane:fullscreen {
+    width: 100vw;
+    height: 100vh;
+    max-width: none;
+    max-height: none;
+    border-radius: 0;
+}
+
+/* Node-details side-panel sub-list (Depends on / Dependents). Bounded scroll
+   so a load-bearing package with 80 dependents doesn't push the rest of
+   the page off-screen. Each row is click-routable — selecting a different
+   node updates the panel in place rather than opening a new view. */
+.visualize-deps-pane {
+    max-height: 240px;
+    overflow-y: auto;
+    border: 1px solid var(--mud-palette-lines-default);
+    border-radius: 4px;
+    padding: 0.25rem 0.5rem;
+}
+
+.visualize-dep-row {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.25rem 0.25rem;
+    cursor: pointer;
+    border-radius: 3px;
+    transition: background-color 80ms ease-out;
+}
+
+.visualize-dep-row:hover {
+    background-color: var(--mud-palette-action-default-hover);
+}
+

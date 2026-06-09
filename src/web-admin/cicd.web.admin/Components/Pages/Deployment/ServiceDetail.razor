@@ -1,0 +1,316 @@
+@page "/deployment/services/{Id}"
+@inject DeploymentApiClient Api
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+
+<PageTitle>Deployment — Service @_dto?.Name</PageTitle>
+
+<MudBreadcrumbs Items="@_crumbs" Class="mb-2" />
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" />
+}
+else if (_error is { Length: > 0 })
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="my-2">@_error</MudAlert>
+}
+else if (_isNew)
+{
+    <MudText Typo="Typo.h4" Class="mb-3">Register a new service</MudText>
+
+    <MudPaper Elevation="1" Class="pa-4" Style="max-width: 720px;">
+        <MudStack Spacing="3">
+            <MudTextField @bind-Value="_newName"
+                          Label="Name"
+                          Variant="Variant.Outlined"
+                          Required="true"
+                          MaxLength="200"
+                          HelperText="Unique across the catalog (e.g. 'billing-api')." />
+            <MudSelect T="ServiceKindDto"
+                       @bind-Value="_newKind"
+                       Label="Kind"
+                       Variant="Variant.Outlined">
+                @foreach (var k in Enum.GetValues<ServiceKindDto>())
+                {
+                    <MudSelectItem Value="@k">@k</MudSelectItem>
+                }
+            </MudSelect>
+            <MudTextField @bind-Value="_newRepoUrl"
+                          Label="Repository URL"
+                          Variant="Variant.Outlined"
+                          Required="true"
+                          MaxLength="500" />
+            <MudTextField @bind-Value="_newTargetFw"
+                          Label="Target framework"
+                          Variant="Variant.Outlined"
+                          Required="true"
+                          MaxLength="50"
+                          HelperText="e.g. net10.0" />
+
+            <MudStack Row="true" Spacing="2">
+                <MudButton Variant="Variant.Filled"
+                           Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.Save"
+                           OnClick="RegisterAsync"
+                           Disabled="@_saving">
+                    Register
+                </MudButton>
+                <MudButton Variant="Variant.Text"
+                           OnClick="@(() => Nav.NavigateTo("/deployment/services"))">
+                    Cancel
+                </MudButton>
+            </MudStack>
+        </MudStack>
+    </MudPaper>
+}
+else if (_dto is not null)
+{
+    <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3">
+        <MudText Typo="Typo.h4">@_dto.Name</MudText>
+        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@_dto.Kind</MudChip>
+        <MudChip T="string"
+                 Size="Size.Small"
+                 Color="@(_dto.IsActive ? Color.Success : Color.Default)"
+                 Variant="Variant.Filled">
+            @(_dto.IsActive ? "Active" : "Inactive")
+        </MudChip>
+        <MudSpacer />
+        @if (_dto.IsActive)
+        {
+            <MudButton Variant="Variant.Outlined"
+                       Color="Color.Warning"
+                       StartIcon="@Icons.Material.Filled.PauseCircle"
+                       OnClick="DeactivateAsync"
+                       Disabled="@_saving">Deactivate</MudButton>
+        }
+        else
+        {
+            <MudButton Variant="Variant.Outlined"
+                       Color="Color.Success"
+                       StartIcon="@Icons.Material.Filled.PlayCircle"
+                       OnClick="ReactivateAsync"
+                       Disabled="@_saving">Reactivate</MudButton>
+        }
+    </MudStack>
+
+    <MudGrid>
+        <MudItem xs="12" md="6">
+            <MudPaper Elevation="1" Class="pa-4 mb-4">
+                <MudText Typo="Typo.h6" Class="mb-3">Identity</MudText>
+                <MudTextField @bind-Value="_renameName"
+                              Label="Name"
+                              Variant="Variant.Outlined"
+                              MaxLength="200" />
+                <MudButton Class="mt-2"
+                           Variant="Variant.Filled"
+                           Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.Save"
+                           OnClick="RenameAsync"
+                           Disabled="@(_saving || string.Equals(_renameName, _dto.Name, StringComparison.Ordinal))">
+                    Save name
+                </MudButton>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" md="6">
+            <MudPaper Elevation="1" Class="pa-4 mb-4">
+                <MudText Typo="Typo.h6" Class="mb-3">Repository</MudText>
+                <MudTextField @bind-Value="_repoUrl"
+                              Label="Repository URL"
+                              Variant="Variant.Outlined"
+                              MaxLength="500" />
+                <MudTextField @bind-Value="_targetFw"
+                              Label="Target framework"
+                              Variant="Variant.Outlined"
+                              MaxLength="50"
+                              Class="mt-2" />
+                <MudButton Class="mt-2"
+                           Variant="Variant.Filled"
+                           Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.Save"
+                           OnClick="UpdateRepoAsync"
+                           Disabled="@(_saving || NoRepoChange())">
+                    Save repository info
+                </MudButton>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12">
+            <ReleasesCard DeployableUnitId="@_dto.Id"
+                          DeployableUnitName="@_dto.Name"
+                          UnitIsApplication="false" />
+        </MudItem>
+        <MudItem xs="12">
+            <ConfigurationCard DeployableUnitId="@_dto.Id"
+                               DeployableUnitName="@_dto.Name" />
+        </MudItem>
+        <MudItem xs="12">
+            <MudPaper Elevation="1" Class="pa-4">
+                <MudText Typo="Typo.h6" Class="mb-2">Metadata</MudText>
+                <DetailRow Label="Service id" Value="@_dto.Id.ToString()" Mono="true" />
+                <DetailRow Label="Created (UTC)" Value="@_dto.CreatedAtUtc.ToString("u")" />
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+}
+
+@code {
+    [Parameter] public string? Id { get; set; }
+
+    private ServiceDto? _dto;
+    private bool _isNew;
+    private bool _loading;
+    private bool _saving;
+    private string? _error;
+
+    private string _newName = "";
+    private ServiceKindDto _newKind = ServiceKindDto.WebApi;
+    private string _newRepoUrl = "";
+    private string _newTargetFw = "net10.0";
+
+    private string _renameName = "";
+    private string _repoUrl = "";
+    private string _targetFw = "";
+
+    private List<BreadcrumbItem> _crumbs = new();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _isNew = string.Equals(Id, "new", StringComparison.OrdinalIgnoreCase);
+        _crumbs = new()
+        {
+            new BreadcrumbItem("Services", "/deployment/services"),
+            new BreadcrumbItem(_isNew ? "New" : (_dto?.Name ?? "Detail"), href: null, disabled: true),
+        };
+
+        if (_isNew) return;
+
+        if (Guid.TryParse(Id, out var id))
+        {
+            await LoadAsync(id);
+        }
+        else
+        {
+            _error = "Invalid service id.";
+        }
+    }
+
+    private async Task LoadAsync(Guid id)
+    {
+        _loading = true; _error = null;
+        try
+        {
+            _dto = await Api.GetServiceAsync(id);
+            if (_dto is null)
+            {
+                _error = $"Service {id} not found.";
+                return;
+            }
+            _renameName = _dto.Name;
+            _repoUrl = _dto.RepositoryUrl;
+            _targetFw = _dto.TargetFramework;
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private bool NoRepoChange() =>
+        _dto is null
+        || (string.Equals(_repoUrl, _dto.RepositoryUrl, StringComparison.Ordinal)
+            && string.Equals(_targetFw, _dto.TargetFramework, StringComparison.Ordinal));
+
+    private async Task RegisterAsync()
+    {
+        _saving = true;
+        try
+        {
+            var body = new RegisterServiceRequest(_newName.Trim(), _newKind,
+                _newRepoUrl.Trim(), _newTargetFw.Trim());
+            var created = await Api.RegisterServiceAsync(body);
+            Snackbar.Add($"Registered '{created.Name}'.", Severity.Success);
+            Nav.NavigateTo($"/deployment/services/{created.Id}");
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task RenameAsync()
+    {
+        if (_dto is null) return;
+        _saving = true;
+        try
+        {
+            await Api.RenameServiceAsync(_dto.Id, new RenameServiceRequest(_renameName));
+            Snackbar.Add("Renamed.", Severity.Success);
+            await LoadAsync(_dto.Id);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task UpdateRepoAsync()
+    {
+        if (_dto is null) return;
+        _saving = true;
+        try
+        {
+            await Api.UpdateServiceRepositoryInfoAsync(_dto.Id,
+                new UpdateServiceRepositoryInfoRequest(_repoUrl, _targetFw));
+            Snackbar.Add("Repository info updated.", Severity.Success);
+            await LoadAsync(_dto.Id);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task DeactivateAsync()
+    {
+        if (_dto is null) return;
+        _saving = true;
+        try
+        {
+            await Api.DeactivateServiceAsync(_dto.Id);
+            Snackbar.Add("Deactivated.", Severity.Success);
+            await LoadAsync(_dto.Id);
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        finally { _saving = false; }
+    }
+
+    private async Task ReactivateAsync()
+    {
+        if (_dto is null) return;
+        _saving = true;
+        try
+        {
+            await Api.ReactivateServiceAsync(_dto.Id);
+            Snackbar.Add("Reactivated.", Severity.Success);
+            await LoadAsync(_dto.Id);
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        finally { _saving = false; }
+    }
+}

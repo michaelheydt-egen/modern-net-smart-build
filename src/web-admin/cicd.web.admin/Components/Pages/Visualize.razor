@@ -1,0 +1,1016 @@
+@page "/sca/visualize/{Number:int}"
+@inject IBuildStore Store
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<PageTitle>Visualize SBOM — Build #@Number</PageTitle>
+
+<MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4">
+    <MudIconButton Icon="@Icons.Material.Filled.ArrowBack"
+                   OnClick="@(() => Nav.NavigateTo("/sca/sbom"))"
+                   aria-label="Back to SBOM viewer" />
+    <MudText Typo="Typo.h4">Visualize SBOM</MudText>
+    <MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-secondary); font-family: ui-monospace, monospace;">
+        @_jobName · build #@Number
+    </MudText>
+    <MudSpacer />
+</MudStack>
+
+@* ---------- Visualization panel ----------
+   View toggle in the header switches between the raw JSON and the D3 graph.
+   Both views share the underlying bytes (fetched once); the graph builds
+   lazily so users who only want JSON don't pay the parse + projection cost. *@
+<MudPaper Elevation="1" Class="pa-4 mb-4 visualization-panel">
+    <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2">
+        <MudIcon Icon="@(IsGraphView ? Icons.Material.Filled.Hub : Icons.Material.Filled.DataObject)"
+                 Color="Color.Primary" />
+        <MudText Typo="Typo.h6">@(IsGraphView ? "Dependency graph" : "bom-vex.json")</MudText>
+        @if (_sizeBytes > 0 && !IsGraphView)
+        {
+            <MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-secondary);">
+                @FormatSize(_sizeBytes)
+            </MudText>
+        }
+        @if (IsGraphView && _graphStats is { } gs)
+        {
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@gs.NodeCount nodes</MudChip>
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@gs.EdgeCount edges</MudChip>
+            @if (gs.VulnerableNodeCount > 0)
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Filled">
+                    @gs.VulnerableNodeCount vulnerable
+                </MudChip>
+            }
+        }
+        <MudSpacer />
+        @if (IsGraphView)
+        {
+            @* Browser Fullscreen API — Escape exits, no CSS layering issues. *@
+            <MudTooltip Text="Fullscreen (Esc to exit)">
+                <MudIconButton Icon="@Icons.Material.Filled.Fullscreen"
+                               Size="Size.Small"
+                               OnClick="OnToggleFullscreenAsync"
+                               aria-label="Toggle graph fullscreen" />
+            </MudTooltip>
+        }
+        <MudToggleGroup T="string"
+                        Value="@_view"
+                        ValueChanged="OnViewChangedAsync"
+                        Color="Color.Primary"
+                        Size="Size.Small">
+            <MudToggleItem T="string" Value="@JsonView">Raw JSON</MudToggleItem>
+            <MudToggleItem T="string" Value="@GraphView">Graph</MudToggleItem>
+        </MudToggleGroup>
+    </MudStack>
+
+    @if (_loading)
+    {
+        <MudProgressLinear Indeterminate="true" />
+    }
+    else if (_error is { Length: > 0 })
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined">@_error</MudAlert>
+    }
+    else if (_tooLarge && !IsGraphView)
+    {
+        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
+            bom-vex.json is @FormatSize(_sizeBytes); too large for inline rendering
+            (cap @FormatSize(MaxPreviewBytes)). Switch to <strong>Graph</strong> view —
+            it's not size-bound and the structured analysis works on larger SBOMs.
+        </MudAlert>
+    }
+    else if (IsGraphView)
+    {
+        @if (_graphBuilding)
+        {
+            <MudProgressLinear Indeterminate="true" Class="my-2" />
+            <MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-secondary);">
+                Building dependency graph…
+            </MudText>
+        }
+        else if (_graphError is { Length: > 0 })
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined">@_graphError</MudAlert>
+        }
+        else if (_graph is not null)
+        {
+            @* ---------- Filter bar ----------
+               Search by name, gate on minimum severity, restrict to vulnerable nodes,
+               or wipe state with Reset. All three filter controls flow into one
+               sbomGraphFilter call so the JS only re-applies styles once per change. *@
+            <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3" Spacing="2" Wrap="Wrap.Wrap">
+                <MudTextField T="string"
+                              Value="@_filterSearch"
+                              ValueChanged="OnFilterSearchChangedAsync"
+                              Placeholder="Search by name…"
+                              Adornment="Adornment.Start"
+                              AdornmentIcon="@Icons.Material.Filled.Search"
+                              IconSize="Size.Small"
+                              Variant="Variant.Outlined"
+                              Margin="Margin.Dense"
+                              Immediate="true"
+                              Clearable="true"
+                              Style="max-width: 18rem;" />
+                <MudSelect T="string"
+                           Value="@_filterMinSeverity"
+                           ValueChanged="OnFilterSeverityChangedAsync"
+                           Label="Min severity"
+                           Variant="Variant.Outlined"
+                           Margin="Margin.Dense"
+                           Dense="true"
+                           Style="max-width: 10rem;">
+                    <MudSelectItem Value="@("all")">All</MudSelectItem>
+                    <MudSelectItem Value="@("low")">Low+</MudSelectItem>
+                    <MudSelectItem Value="@("medium")">Medium+</MudSelectItem>
+                    <MudSelectItem Value="@("high")">High+</MudSelectItem>
+                    <MudSelectItem Value="@("critical")">Critical only</MudSelectItem>
+                </MudSelect>
+                <MudSwitch T="bool"
+                           Value="@_filterVulnOnly"
+                           ValueChanged="OnFilterVulnOnlyChangedAsync"
+                           Color="Color.Warning"
+                           Label="Vulnerable only" />
+                <MudSpacer />
+                <MudButton StartIcon="@Icons.Material.Filled.Refresh"
+                           Variant="Variant.Outlined"
+                           Size="Size.Small"
+                           OnClick="OnResetAsync">
+                    Reset
+                </MudButton>
+            </MudStack>
+
+            <div @ref="_graphContainer" class="visualize-graph-pane">
+                @* Hover overlay — Blazor renders the markup; D3 appends the SVG as a
+                   sibling at runtime. Both live inside the same @ref'd container so
+                   the fullscreen API sweeps the overlay along with the SVG. Blazor
+                   only diffs the children it created, so the SVG is untouched. *@
+                @if ((_hoveredNodeRef is { Length: > 0 } || _pinnedNodeRef is { Length: > 0 })
+                     && FindOverlayNode() is { } hovered)
+                {
+                    var displayedRef       = _hoveredNodeRef ?? _pinnedNodeRef;
+                    var isDisplayedPinned  = displayedRef is not null && displayedRef == _pinnedNodeRef;
+                    <div class="@($"hover-card {_hoverSide}{(isDisplayedPinned ? " pinned" : string.Empty)}")">
+                        @if (isDisplayedPinned)
+                        {
+                            @* Top-right X — primary unpin affordance.
+                               Inline aria-label and title so screen readers + native tooltips agree. *@
+                            <button type="button"
+                                    class="hover-card-close"
+                                    @onclick="OnUnpinClick"
+                                    title="Unpin (close overlay)"
+                                    aria-label="Unpin and close the hover overlay">
+                                ✕
+                            </button>
+                        }
+                        <div class="hover-card-name">
+                            @if (isDisplayedPinned)
+                            {
+                                @* The pin icon is also clickable — same handler as the X.
+                                   Some users will reach for the icon they see ("the pin"); the
+                                   X is the more universal close affordance. Both work. *@
+                                <span class="hover-card-pin-toggle"
+                                      @onclick="OnUnpinClick"
+                                      title="Unpin"
+                                      role="button"
+                                      aria-label="Unpin">
+                                    <MudIcon Icon="@Icons.Material.Filled.PushPin"
+                                             Size="Size.Small"
+                                             Style="vertical-align: -3px; margin-right: 0.2rem; color: #facc15;" />
+                                </span>
+                            }
+                            @hovered.Name
+                        </div>
+                        @if (!string.IsNullOrEmpty(hovered.Version))
+                        {
+                            <div class="hover-card-version">@hovered.Version</div>
+                        }
+                        <div class="hover-card-row">
+                            @if (!string.IsNullOrEmpty(hovered.Type))
+                            {
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@hovered.Type</MudChip>
+                            }
+                            @if (GetLicenseCategoryFor(hovered.Ref) is { } cat)
+                            {
+                                <MudChip T="string" Size="Size.Small"
+                                         Color="@LicenseCategoryColor(cat)"
+                                         Variant="Variant.Filled">
+                                    @LicenseAnalyzer.Display(cat)
+                                </MudChip>
+                            }
+                        </div>
+
+                        @if (hovered.VulnCount > 0)
+                        {
+                            <div class="hover-card-section">
+                                <div class="hover-card-section-title">Vulnerabilities</div>
+                                <div class="hover-card-row">
+                                    <MudChip T="string" Size="Size.Small"
+                                             Color="@SeverityColor(hovered.WorstSeverity)"
+                                             Variant="Variant.Filled">
+                                        @hovered.VulnCount · @(hovered.WorstSeverity ?? "unrated")
+                                    </MudChip>
+                                </div>
+                                @foreach (var v in GetVulnerabilities(hovered.Ref).Take(3))
+                                {
+                                    <div class="hover-card-vuln">@(v.Id ?? "—")</div>
+                                }
+                            </div>
+                        }
+
+                        <div class="hover-card-section">
+                            <div class="hover-card-section-title">Graph</div>
+                            <div class="hover-card-stats">
+                                <span>@hovered.InDegree dependents</span>
+                                <span>·</span>
+                                <span>@hovered.OutDegree deps</span>
+                            </div>
+                            @if (hovered.DepthFromRoot >= 0)
+                            {
+                                <div class="hover-card-stats">depth @hovered.DepthFromRoot from root</div>
+                            }
+                        </div>
+
+                        @{
+                            var outRefs = _graph?.Edges.Where(e => e.From == hovered.Ref)
+                                                       .Take(3)
+                                                       .Select(e => e.To)
+                                                       .ToList();
+                        }
+                        @if (outRefs is { Count: > 0 })
+                        {
+                            <div class="hover-card-section">
+                                <div class="hover-card-section-title">Depends on</div>
+                                @foreach (var r in outRefs)
+                                {
+                                    <div class="hover-card-dep">@ResolveDisplayName(r)</div>
+                                }
+                                @{
+                                    var totalOut = _graph!.Edges.Count(e => e.From == hovered.Ref);
+                                }
+                                @if (totalOut > outRefs.Count)
+                                {
+                                    <div class="hover-card-more">+ @(totalOut - outRefs.Count) more</div>
+                                }
+                            </div>
+                        }
+
+                        <div class="hover-card-footer">
+                            @if (isDisplayedPinned)
+                            {
+                                <span>Pinned · click node to unpin</span>
+                            }
+                            else if (_pinnedNodeRef is { Length: > 0 })
+                            {
+                                <span>Click to move pin here</span>
+                            }
+                            else
+                            {
+                                <span>Click to pin</span>
+                            }
+                            <span style="display: block; margin-top: 0.3rem;">@hovered.Ref</span>
+                        </div>
+                    </div>
+                }
+            </div>
+
+            <MudStack Row="true" Class="mt-2" AlignItems="AlignItems.Center" Spacing="2"
+                      Style="color: var(--mud-palette-text-secondary); font-size: 0.8em;">
+                <span>Tip: drag nodes · scroll to zoom · click for details · hover to highlight neighbors</span>
+                @if (_graphStats is { UnreachableCount: > 0 } stats2)
+                {
+                    <MudSpacer />
+                    <span>@stats2.UnreachableCount node(s) unreachable from root</span>
+                }
+            </MudStack>
+        }
+    }
+    else if (_text is { Length: > 0 })
+    {
+        <pre @ref="_textElement" class="visualize-pane language-json">@_text</pre>
+    }
+</MudPaper>
+
+@* ---------- License analysis panel ----------
+   Renders alongside the graph view. Categorizes every component's license,
+   surfaces compatibility findings, and lets the user spotlight any one of
+   them on the dependency graph above via the Locate button (round-trips
+   through sbomGraphFilter's highlightRefs mode). *@
+@if (IsGraphView && _licenseAnalysis is { } la)
+{
+    <MudPaper Elevation="1" Class="pa-4 mb-4">
+        <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3">
+            <MudIcon Icon="@Icons.Material.Filled.Gavel" Color="Color.Primary" />
+            <MudText Typo="Typo.h6">License analysis</MudText>
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@la.Conflicts.Count findings</MudChip>
+            <MudSpacer />
+            @if (_highlightedRefs is { Count: > 0 })
+            {
+                <MudButton StartIcon="@Icons.Material.Filled.HighlightOff"
+                           Variant="Variant.Outlined"
+                           Size="Size.Small"
+                           OnClick="OnClearHighlightAsync">
+                    Clear highlight
+                </MudButton>
+            }
+        </MudStack>
+
+        <DetailRow Label="Root project category" Value="@LicenseAnalyzer.Display(la.RootCategory)" />
+
+        @* Category breakdown chips — only render the ones with non-zero counts so
+           the row stays compact on cleanly-licensed SBOMs. *@
+        <MudStack Row="true" AlignItems="AlignItems.Center" Class="my-2" Spacing="2" Wrap="Wrap.Wrap">
+            @if (la.Counts.Permissive > 0)
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Filled">
+                    Permissive @la.Counts.Permissive
+                </MudChip>
+            }
+            @if (la.Counts.WeakCopyleft > 0)
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Filled">
+                    Weak copyleft @la.Counts.WeakCopyleft
+                </MudChip>
+            }
+            @if (la.Counts.StrongCopyleft > 0)
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Filled">
+                    Strong copyleft @la.Counts.StrongCopyleft
+                </MudChip>
+            }
+            @if (la.Counts.NetworkCopyleft > 0)
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Filled">
+                    Network copyleft @la.Counts.NetworkCopyleft
+                </MudChip>
+            }
+            @if (la.Counts.PublicDomain > 0)
+            {
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">
+                    Public domain @la.Counts.PublicDomain
+                </MudChip>
+            }
+            @if (la.Counts.Proprietary > 0)
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined">
+                    Proprietary @la.Counts.Proprietary
+                </MudChip>
+            }
+            @if (la.Counts.Unknown > 0)
+            {
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">
+                    Unknown @la.Counts.Unknown
+                </MudChip>
+            }
+        </MudStack>
+
+        @if (la.Conflicts.Count == 0)
+        {
+            <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Class="mt-2">
+                No license-compatibility findings against our ruleset. This is a triage
+                heuristic, not legal advice — anything shipped externally should still
+                get a proper review.
+            </MudAlert>
+        }
+        else
+        {
+            <MudTable Items="@OrderedConflicts(la.Conflicts)"
+                      Dense="true"
+                      Hover="true"
+                      Striped="true"
+                      RowsPerPage="10"
+                      T="LicenseConflict">
+                <HeaderContent>
+                    <MudTh Style="width: 6rem;">Severity</MudTh>
+                    <MudTh>Component</MudTh>
+                    <MudTh Style="width: 11rem;">Category</MudTh>
+                    <MudTh>Reason</MudTh>
+                    <MudTh Style="width: 4rem; text-align: center;"></MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd>
+                        <MudChip T="string" Size="Size.Small"
+                                 Color="@ConflictColor(context.Severity)"
+                                 Variant="Variant.Filled">
+                            @context.Severity
+                        </MudChip>
+                    </MudTd>
+                    <MudTd Style="font-family: ui-monospace, monospace; font-size: 0.85em; word-break: break-all;">
+                        @ResolveDisplayName(context.SourceRef)
+                    </MudTd>
+                    <MudTd Style="font-size: 0.85em;">@LicenseAnalyzer.Display(context.SourceCategory)</MudTd>
+                    <MudTd Style="font-size: 0.85em;">@context.Reason</MudTd>
+                    <MudTd Style="text-align: center;">
+                        <MudTooltip Text="Highlight on graph">
+                            <MudIconButton Icon="@Icons.Material.Filled.MyLocation"
+                                           Size="Size.Small"
+                                           OnClick="@(() => OnLocateConflictAsync(context.SourceRef))" />
+                        </MudTooltip>
+                    </MudTd>
+                </RowTemplate>
+                <PagerContent>
+                    <MudTablePager PageSizeOptions="new[] { 10, 25, 50 }" />
+                </PagerContent>
+            </MudTable>
+        }
+    </MudPaper>
+}
+
+@* ---------- Node details panel ----------
+   Populated when the user clicks a node in the graph (callback round-trips through
+   JS → OnNodeClicked → _selectedNodeRef). Hidden when no selection. *@
+@if (IsGraphView && _selectedNodeRef is { Length: > 0 } && FindSelectedNode() is { } selectedNode)
+{
+    <MudPaper Elevation="1" Class="pa-4 mb-4">
+        <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3">
+            <MudIcon Icon="@Icons.Material.Filled.Insights" Color="Color.Primary" />
+            <MudText Typo="Typo.h6">Node details</MudText>
+            <MudChip T="string" Size="Size.Small" Color="@NodeSeverityColor(selectedNode)" Variant="Variant.Filled">
+                @NodeSeverityLabel(selectedNode)
+            </MudChip>
+            <MudSpacer />
+            <MudIconButton Icon="@Icons.Material.Filled.Close"
+                           Size="Size.Small"
+                           OnClick="@(() => _selectedNodeRef = null)"
+                           aria-label="Close details" />
+        </MudStack>
+
+        <DetailRow Label="Name"           Value="@selectedNode.Name" />
+        <DetailRow Label="Version"        Value="@selectedNode.Version" Mono="true" />
+        <DetailRow Label="Type"           Value="@selectedNode.Type" />
+        <DetailRow Label="BOM ref"        Value="@selectedNode.Ref" Mono="true" />
+        <DetailRow Label="Licenses"       Value="@(selectedNode.Licenses.Count > 0 ? string.Join(", ", selectedNode.Licenses) : null)" />
+        <DetailRow Label="Depth from root" Value="@(selectedNode.DepthFromRoot >= 0 ? selectedNode.DepthFromRoot.ToString() : "unreachable")" />
+        <DetailRow Label="Dependents"     Value="@selectedNode.InDegree.ToString()" />
+        <DetailRow Label="Dependencies"   Value="@selectedNode.OutDegree.ToString()" />
+
+        @{
+            var nodeVulns = GetVulnerabilities(selectedNode.Ref).ToList();
+            var outRefs = _graph!.Edges.Where(e => e.From == selectedNode.Ref).Select(e => e.To).ToList();
+            var inRefs  = _graph.Edges.Where(e => e.To == selectedNode.Ref).Select(e => e.From).ToList();
+        }
+
+        @if (nodeVulns.Count > 0)
+        {
+            <MudDivider Class="my-3" />
+            <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2">
+                <MudText Typo="Typo.subtitle2">Vulnerabilities</MudText>
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@nodeVulns.Count</MudChip>
+            </MudStack>
+            <MudSimpleTable Dense="true" Hover="true" Style="font-size: 0.85em;">
+                <thead>
+                    <tr>
+                        <th style="width: 12rem;">ID</th>
+                        <th style="width: 7rem;">Severity</th>
+                        <th>Description</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var v in nodeVulns)
+                    {
+                        <tr>
+                            <td style="font-family: ui-monospace, monospace;">@(v.Id ?? "—")</td>
+                            <td>
+                                <MudChip T="string" Size="Size.Small"
+                                         Color="@SeverityColor(v.Severity)"
+                                         Variant="Variant.Filled">
+                                    @(string.IsNullOrEmpty(v.Severity) ? "unrated" : v.Severity)
+                                </MudChip>
+                            </td>
+                            <td>@TruncateText(v.Description, 160)</td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        }
+
+        @if (outRefs.Count > 0)
+        {
+            <MudDivider Class="my-3" />
+            <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2">
+                <MudText Typo="Typo.subtitle2">Depends on</MudText>
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@outRefs.Count</MudChip>
+            </MudStack>
+            <div class="visualize-deps-pane">
+                @foreach (var r in outRefs)
+                {
+                    <div class="visualize-dep-row" @onclick="@(() => _selectedNodeRef = r)">
+                        <MudIcon Icon="@Icons.Material.Filled.SubdirectoryArrowRight" Size="Size.Small" />
+                        <span style="font-family: ui-monospace, monospace; font-size: 0.85em;">@ResolveDisplayName(r)</span>
+                    </div>
+                }
+            </div>
+        }
+
+        @if (inRefs.Count > 0)
+        {
+            <MudDivider Class="my-3" />
+            <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2">
+                <MudText Typo="Typo.subtitle2">Dependents</MudText>
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@inRefs.Count</MudChip>
+            </MudStack>
+            <div class="visualize-deps-pane">
+                @foreach (var r in inRefs)
+                {
+                    <div class="visualize-dep-row" @onclick="@(() => _selectedNodeRef = r)">
+                        <MudIcon Icon="@Icons.Material.Filled.SubdirectoryArrowLeft" Size="Size.Small" />
+                        <span style="font-family: ui-monospace, monospace; font-size: 0.85em;">@ResolveDisplayName(r)</span>
+                    </div>
+                }
+            </div>
+        }
+    </MudPaper>
+}
+
+@code {
+    public const long MaxPreviewBytes = 10L * 1024 * 1024;
+    private const string _jobName  = "cicd-build";
+    private const string JsonView  = "json";
+    private const string GraphView = "graph";
+
+    [Parameter] public int Number { get; set; }
+
+    // --- Shared state ---
+    private bool _loading;
+    private string? _error;
+    private byte[]? _bytes;
+    private long _sizeBytes;
+    private bool _tooLarge;
+    private int _lastLoadedNumber;
+    // Graph is the default — that's the analysis surface most users come here for.
+    // Raw JSON is still one click away via the toggle in the panel header.
+    private string _view = GraphView;
+
+    // --- JSON view state ---
+    private string? _text;
+    private ElementReference _textElement;
+    private bool _needHighlight;
+
+    // --- Graph view state ---
+    private SbomDocument? _doc;
+    private DependencyGraph? _graph;
+    private string? _graphJson;
+    private GraphStats? _graphStats;
+    private bool _graphBuilding;
+    private string? _graphError;
+    private ElementReference _graphContainer;
+    private bool _needGraphRender;
+    private bool _graphCurrentlyMounted;
+    private DotNetObjectReference<Visualize>? _dotNetRef;
+
+    // --- Filter + selection state ---
+    private string _filterSearch = string.Empty;
+    private string _filterMinSeverity = "all";
+    private bool   _filterVulnOnly;
+    private string? _selectedNodeRef;
+    // Transient hover state — driven by D3 mouseover/mouseout via JSInvokable.
+    // Distinct from _selectedNodeRef (click) so the user can hover one node while
+    // a different one is pinned in the details panel below.
+    private string? _hoveredNodeRef;
+    private string _hoverSide = "right";
+    // Pinned overlay — set by clicking a node; survives mouseout. Clicking the
+    // already-pinned node toggles it off. Hover still wins for display when
+    // active (lets the user peek at other nodes while keeping the pin as the
+    // anchor that reappears on mouseout).
+    private string? _pinnedNodeRef;
+    // When set, the JS layer dims everything except these refs (+ direct neighbors)
+    // — driven by the license-analysis panel's "Locate" button.
+    private IReadOnlyList<string>? _highlightedRefs;
+
+    // --- License analysis (populated alongside the graph build) ---
+    private LicenseAnalysis? _licenseAnalysis;
+
+    private bool IsGraphView => _view == GraphView;
+
+    protected override void OnInitialized()
+    {
+        _dotNetRef = DotNetObjectReference.Create(this);
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Number != _lastLoadedNumber)
+        {
+            _lastLoadedNumber = Number;
+            // Different build → invalidate everything graph-related.
+            _doc = null;
+            _graph = null;
+            _graphJson = null;
+            _graphStats = null;
+            _graphError = null;
+            _selectedNodeRef = null;
+            _hoveredNodeRef = null;
+            _pinnedNodeRef = null;
+            _licenseAnalysis = null;
+            _highlightedRefs = null;
+            await LoadAsync();
+
+            // If the page starts in graph view (now the default), build it eagerly
+            // so the user lands directly on the rendered graph rather than on an
+            // empty panel waiting for the toggle click. Skip if the load failed or
+            // the file is too large to parse — those paths show their own messages.
+            if (_view == GraphView && _bytes is not null && !_tooLarge && _error is null)
+            {
+                await BuildGraphAsync();
+                _needGraphRender = _graphJson is not null;
+            }
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _error = null;
+        _text = null;
+        _bytes = null;
+        _sizeBytes = 0;
+        _tooLarge = false;
+        StateHasChanged();
+
+        try
+        {
+            var bytes = await Store.GetArtifactBytesAsync(_jobName, Number, "bom-vex.json");
+            _bytes = bytes;
+            _sizeBytes = bytes.LongLength;
+            if (bytes.LongLength > MaxPreviewBytes)
+            {
+                _tooLarge = true;
+                return;
+            }
+            _text = PrettyPrintJson(bytes);
+            _needHighlight = _view == JsonView;
+        }
+        catch (Exception ex)
+        {
+            _error = ResolveError(ex);
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task OnViewChangedAsync(string? newView)
+    {
+        if (newView is null || newView == _view) return;
+        _view = newView;
+
+        if (_view == GraphView)
+        {
+            _needHighlight = false;
+            if (_graphJson is null && _bytes is not null)
+            {
+                await BuildGraphAsync();
+            }
+            _needGraphRender = _graphJson is not null;
+        }
+        else
+        {
+            if (_graphCurrentlyMounted)
+            {
+                await TryDestroyGraphAsync();
+            }
+            _selectedNodeRef = null;
+            _hoveredNodeRef = null;
+            _pinnedNodeRef = null;
+            _needHighlight = _text is not null;
+        }
+
+        StateHasChanged();
+    }
+
+    private async Task BuildGraphAsync()
+    {
+        if (_bytes is null) return;
+
+        _graphBuilding = true;
+        _graphError = null;
+        StateHasChanged();
+
+        try
+        {
+            var built = await Task.Run(() =>
+            {
+                var doc = SbomReader.Parse(_bytes);
+                if (doc is null) return (Doc: (SbomDocument?)null, Graph: (DependencyGraph?)null, Analysis: (LicenseAnalysis?)null, Json: (string?)null);
+                var graph    = SbomGraphBuilder.Build(doc);
+                var analysis = LicenseAnalyzer.Analyze(graph);
+                var json     = D3GraphAdapter.ToD3Json(graph);
+                return (Doc: (SbomDocument?)doc, Graph: (DependencyGraph?)graph, Analysis: (LicenseAnalysis?)analysis, Json: (string?)json);
+            });
+
+            if (built.Doc is null || built.Graph is null || built.Json is null)
+            {
+                _graphError = "Could not parse the SBOM into a dependency graph.";
+                return;
+            }
+            _doc             = built.Doc;
+            _graph           = built.Graph;
+            _graphJson       = built.Json;
+            _graphStats      = built.Graph.Stats;
+            _licenseAnalysis = built.Analysis;
+        }
+        catch (Exception ex)
+        {
+            _graphError = ex.Message;
+        }
+        finally
+        {
+            _graphBuilding = false;
+            StateHasChanged();
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_needHighlight && _view == JsonView)
+        {
+            _needHighlight = false;
+            try { await JS.InvokeVoidAsync("artifactHighlight", _textElement); }
+            catch (JSDisconnectedException) { }
+            catch (TaskCanceledException)   { }
+        }
+
+        if (_needGraphRender && _view == GraphView && _graphJson is not null)
+        {
+            _needGraphRender = false;
+            try
+            {
+                await JS.InvokeVoidAsync("sbomGraphRender", _graphContainer, _graphJson, _dotNetRef);
+                _graphCurrentlyMounted = true;
+                // Apply any non-default filter state straight away (e.g., if the user
+                // toggled off then back on the graph and we kept the filters).
+                if (HasNonDefaultFilter())
+                {
+                    await PushFilterToJsAsync();
+                }
+            }
+            catch (JSDisconnectedException) { }
+            catch (TaskCanceledException)   { }
+        }
+    }
+
+    private bool HasNonDefaultFilter() =>
+        !string.IsNullOrEmpty(_filterSearch) || _filterMinSeverity != "all" || _filterVulnOnly;
+
+    private async Task TryDestroyGraphAsync()
+    {
+        try { await JS.InvokeVoidAsync("sbomGraphDestroy", _graphContainer); }
+        catch (JSDisconnectedException) { }
+        catch (TaskCanceledException)   { }
+        finally { _graphCurrentlyMounted = false; }
+    }
+
+    private async Task OnToggleFullscreenAsync()
+    {
+        if (!_graphCurrentlyMounted) return;
+        try { await JS.InvokeVoidAsync("sbomGraphToggleFullscreen", _graphContainer); }
+        catch (JSDisconnectedException) { }
+        catch (TaskCanceledException)   { }
+    }
+
+    // --- Filter wiring ---
+
+    private async Task OnFilterSearchChangedAsync(string? value)
+    {
+        _filterSearch = value ?? string.Empty;
+        await PushFilterToJsAsync();
+    }
+
+    private async Task OnFilterSeverityChangedAsync(string? value)
+    {
+        _filterMinSeverity = string.IsNullOrEmpty(value) ? "all" : value;
+        await PushFilterToJsAsync();
+    }
+
+    private async Task OnFilterVulnOnlyChangedAsync(bool value)
+    {
+        _filterVulnOnly = value;
+        await PushFilterToJsAsync();
+    }
+
+    private async Task PushFilterToJsAsync()
+    {
+        if (!_graphCurrentlyMounted) return;
+        var payload = new
+        {
+            searchText    = _filterSearch ?? string.Empty,
+            minSeverity   = _filterMinSeverity,
+            vulnOnly      = _filterVulnOnly,
+            highlightRefs = _highlightedRefs ?? Array.Empty<string>(),
+        };
+        try { await JS.InvokeVoidAsync("sbomGraphFilter", _graphContainer, payload); }
+        catch (JSDisconnectedException) { }
+        catch (TaskCanceledException)   { }
+    }
+
+    private async Task OnResetAsync()
+    {
+        _filterSearch = string.Empty;
+        _filterMinSeverity = "all";
+        _filterVulnOnly = false;
+        _selectedNodeRef = null;
+        _hoveredNodeRef = null;
+        _pinnedNodeRef = null;
+        _highlightedRefs = null;
+        if (_graphCurrentlyMounted)
+        {
+            await PushFilterToJsAsync();
+            try { await JS.InvokeVoidAsync("sbomGraphReset", _graphContainer); }
+            catch (JSDisconnectedException) { }
+            catch (TaskCanceledException)   { }
+        }
+        StateHasChanged();
+    }
+
+    // --- License-conflict highlight controls ---
+
+    private async Task OnLocateConflictAsync(string nodeRef)
+    {
+        _highlightedRefs = new[] { nodeRef };
+        _selectedNodeRef = nodeRef;   // open the details panel for the same node
+        if (_graphCurrentlyMounted)
+        {
+            await PushFilterToJsAsync();
+        }
+        StateHasChanged();
+    }
+
+    private async Task OnClearHighlightAsync()
+    {
+        _highlightedRefs = null;
+        if (_graphCurrentlyMounted)
+        {
+            await PushFilterToJsAsync();
+        }
+        StateHasChanged();
+    }
+
+    private static IEnumerable<LicenseConflict> OrderedConflicts(IReadOnlyList<LicenseConflict> conflicts)
+    {
+        // Severity desc → ref asc for stable rendering across re-renders.
+        return conflicts
+            .OrderByDescending(c => (int)c.Severity)
+            .ThenBy(c => c.SourceRef, StringComparer.Ordinal);
+    }
+
+    private static Color ConflictColor(LicenseConflictSeverity s) => s switch
+    {
+        LicenseConflictSeverity.High   => Color.Error,
+        LicenseConflictSeverity.Medium => Color.Warning,
+        LicenseConflictSeverity.Low    => Color.Info,
+        _                              => Color.Default,
+    };
+
+    // --- Node click callback (invoked from JS) ---
+
+    [JSInvokable]
+    public Task OnNodeClicked(string nodeRef)
+    {
+        _selectedNodeRef = nodeRef;
+        // Toggle pin: same node again clears it; any other node moves the pin
+        // there. Either way the details panel below tracks the click — they're
+        // intentionally independent (you can unpin the overlay without closing
+        // the details panel, and vice versa via the panel's close button).
+        _pinnedNodeRef = _pinnedNodeRef == nodeRef ? null : nodeRef;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public Task OnNodeHoverEnter(string nodeRef, string side)
+    {
+        _hoveredNodeRef = nodeRef;
+        _hoverSide = side == "left" ? "left" : "right";
+        return InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public Task OnNodeHoverLeave()
+    {
+        _hoveredNodeRef = null;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>
+    /// Closes the pinned overlay. Wired to the pin icon next to the component
+    /// name and to the X button in the top-right corner. Doesn't touch
+    /// _selectedNodeRef — the details panel below is a separate concern with
+    /// its own close button.
+    /// </summary>
+    private void OnUnpinClick()
+    {
+        _pinnedNodeRef = null;
+    }
+
+    // --- Lookup helpers used by the details panel ---
+
+    private GraphNode? FindSelectedNode() => FindNodeByRef(_selectedNodeRef);
+    /// <summary>
+    /// Returns the node currently driving the hover-card overlay's content.
+    /// Hover wins over pin while the cursor is on a node; pin takes over once
+    /// the hover goes away.
+    /// </summary>
+    private GraphNode? FindOverlayNode() => FindNodeByRef(_hoveredNodeRef ?? _pinnedNodeRef);
+
+    private GraphNode? FindNodeByRef(string? nodeRef)
+    {
+        if (nodeRef is not { } r || _graph is null) return null;
+        return _graph.Nodes.FirstOrDefault(n => n.Ref == r);
+    }
+
+    private LicenseCategory? GetLicenseCategoryFor(string nodeRef) =>
+        _licenseAnalysis?.CategoryByNodeRef.TryGetValue(nodeRef, out var c) == true ? c : null;
+
+    private static Color LicenseCategoryColor(LicenseCategory c) => c switch
+    {
+        LicenseCategory.NetworkCopyleft => Color.Error,
+        LicenseCategory.StrongCopyleft  => Color.Warning,
+        LicenseCategory.WeakCopyleft    => Color.Info,
+        LicenseCategory.Proprietary     => Color.Warning,
+        LicenseCategory.PublicDomain    => Color.Success,
+        LicenseCategory.Permissive      => Color.Success,
+        LicenseCategory.Unknown         => Color.Default,
+        _                               => Color.Default,
+    };
+
+    private IEnumerable<SbomVulnerability> GetVulnerabilities(string nodeRef)
+    {
+        if (_doc is null) return Array.Empty<SbomVulnerability>();
+        return _doc.Vulnerabilities.Where(v => v.AffectsRefs.Contains(nodeRef));
+    }
+
+    private string ResolveDisplayName(string bomRef)
+    {
+        var node = _graph?.Nodes.FirstOrDefault(n => n.Ref == bomRef);
+        if (node is null) return bomRef;
+        return string.IsNullOrEmpty(node.Version) ? node.Name : $"{node.Name} @ {node.Version}";
+    }
+
+    private static string NodeSeverityLabel(GraphNode n) =>
+        n.IsRoot ? "root"
+        : n.VulnCount > 0 ? $"{n.WorstSeverity ?? "unrated"} · {n.VulnCount} vuln(s)"
+        : "clean";
+
+    private static Color NodeSeverityColor(GraphNode n)
+    {
+        if (n.IsRoot) return Color.Success;
+        if (n.VulnCount == 0) return Color.Default;
+        return SeverityColor(n.WorstSeverity);
+    }
+
+    private static Color SeverityColor(string? severity) => severity?.ToLowerInvariant() switch
+    {
+        "critical" or "high" => Color.Error,
+        "medium"             => Color.Warning,
+        "low"                => Color.Info,
+        _                    => Color.Default,
+    };
+
+    private static string? TruncateText(string? s, int max)
+    {
+        if (string.IsNullOrEmpty(s)) return null;
+        return s.Length <= max ? s : s[..max] + "…";
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_graphCurrentlyMounted)
+        {
+            await TryDestroyGraphAsync();
+        }
+        _dotNetRef?.Dispose();
+    }
+
+    private static string ResolveError(Exception ex)
+    {
+        if (ex is HttpRequestException hre && hre.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return "This build did not archive bom-vex.json. Re-run cicd-build " +
+                   "(Trivy stage generates the file) and try again.";
+        }
+        return ex.Message;
+    }
+
+    private static string PrettyPrintJson(byte[] bytes)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(new ReadOnlyMemory<byte>(bytes));
+            return System.Text.Json.JsonSerializer.Serialize(doc,
+                new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return System.Text.Encoding.UTF8.GetString(bytes);
+        }
+    }
+
+    private static string FormatSize(long bytes) => bytes switch
+    {
+        < 1024                => $"{bytes} B",
+        < 1024 * 1024         => $"{bytes / 1024.0:F1} KB",
+        < 1024L * 1024 * 1024 => $"{bytes / (1024.0 * 1024):F1} MB",
+        _                     => $"{bytes / (1024.0 * 1024 * 1024):F2} GB"
+    };
+}

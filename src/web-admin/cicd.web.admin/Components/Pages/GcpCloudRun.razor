@@ -1,0 +1,56 @@
+@page "/cloud/google/cloud-run"
+@inject GcpOptions Options
+
+<PageTitle>Google Cloud — Cloud Run</PageTitle>
+
+@* Focused view on Cloud Run services — mirror of GcpArtifacts.razor for the
+   other half of the existing Overview page. *@
+
+<MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4">
+    <MudText Typo="Typo.h4">Google Cloud · Cloud Run</MudText>
+    <MudSpacer />
+
+    @if (Options.Projects.Count == 0)
+    {
+        <MudText Typo="Typo.body2" Color="Color.Warning">
+            No projects configured. Add entries under <code>Google:Projects</code> in appsettings.
+        </MudText>
+    }
+    else
+    {
+        <MudSelect T="string"
+                   Value="@_selectedKey"
+                   ValueChanged="OnProjectChanged"
+                   Variant="Variant.Outlined"
+                   Margin="Margin.Dense"
+                   Style="min-width: 22rem;"
+                   Label="Project">
+            @foreach (var p in Options.Projects)
+            {
+                <MudSelectItem T="string" Value="@p.Key">@p.Label</MudSelectItem>
+            }
+        </MudSelect>
+    }
+</MudStack>
+
+@if (_selected is { } env)
+{
+    <CloudRunSection Environment="@env" />
+}
+
+@code {
+    private string? _selectedKey;
+    private GcpEnvironment? _selected;
+
+    protected override void OnInitialized()
+    {
+        _selected = Options.Default;
+        _selectedKey = _selected?.Key;
+    }
+
+    private void OnProjectChanged(string newKey)
+    {
+        _selectedKey = newKey;
+        _selected = Options.Projects.FirstOrDefault(p => p.Key == newKey);
+    }
+}

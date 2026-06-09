@@ -1,0 +1,126 @@
+@*
+    Read-only timeline of changes for a single ConfigurationSetting, served by
+    the ConfigurationSettingHistory projection (decisions §4.2). The setting
+    itself is also passed in so the dialog header has context.
+
+    Each row renders an inline diff of before → after, masking secret values
+    (the projection stores the SecretReference, not the resolved KV value, but
+    we still avoid drawing attention to it).
+*@
+
+@inject DeploymentApiClient Api
+
+<MudDialog>
+    <DialogContent>
+        <MudStack Spacing="2" Style="min-width: 640px; max-height: 70vh; overflow-y: auto;">
+            <MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-secondary);">
+                Key: <strong style="font-family: ui-monospace, monospace;">@Setting.Key</strong>
+                @if (Setting.EnvironmentName is not null)
+                {
+                    <span> · scope: <strong>@Setting.EnvironmentName</strong></span>
+                }
+                else
+                {
+                    <span> · scope: <em>unit default</em></span>
+                }
+            </MudText>
+
+            @if (_loading)
+            {
+                <MudProgressLinear Indeterminate="true" />
+            }
+            else if (_error is { Length: > 0 })
+            {
+                <MudAlert Severity="Severity.Error" Variant="Variant.Outlined">@_error</MudAlert>
+            }
+            else if (_history is { Count: 0 })
+            {
+                <MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-secondary);">
+                    No history rows. (Did the projection handler run? Wolverine dispatches
+                    <code>ConfigurationSettingChanged</code> after the source SaveChanges.)
+                </MudText>
+            }
+            else if (_history is not null)
+            {
+                <MudTimeline TimelinePosition="TimelinePosition.Start">
+                    @foreach (var h in _history)
+                    {
+                        <MudTimelineItem Color="@KindColor(h.ChangeKind)" Size="Size.Small">
+                            <ItemContent>
+                                <MudText Typo="Typo.body2">
+                                    <strong>@h.ChangeKind</strong>
+                                    <span style="color: var(--mud-palette-text-secondary);">
+                                        @(" by " + h.ChangedByPrincipal + " @ " + h.ChangedAtUtc.ToString("u"))
+                                    </span>
+                                </MudText>
+                                @if (h.ChangeKind == ConfigurationChangeKindDto.Updated)
+                                {
+                                    <MudText Typo="Typo.caption" Style="font-family: ui-monospace, monospace;">
+                                        @RenderState(h.OldIsSecret, h.OldValue, h.OldSecretReference, h.OldValueType)
+                                        →
+                                        @RenderState(h.NewIsSecret, h.NewValue, h.NewSecretReference, h.NewValueType)
+                                    </MudText>
+                                }
+                                else if (h.ChangeKind == ConfigurationChangeKindDto.Created)
+                                {
+                                    <MudText Typo="Typo.caption" Style="font-family: ui-monospace, monospace;">
+                                        new: @RenderState(h.NewIsSecret, h.NewValue, h.NewSecretReference, h.NewValueType)
+                                    </MudText>
+                                }
+                                else
+                                {
+                                    <MudText Typo="Typo.caption" Style="font-family: ui-monospace, monospace;">
+                                        was: @RenderState(h.OldIsSecret, h.OldValue, h.OldSecretReference, h.OldValueType)
+                                    </MudText>
+                                }
+                            </ItemContent>
+                        </MudTimelineItem>
+                    }
+                </MudTimeline>
+            }
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Close">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter, EditorRequired] public ConfigurationSettingDto Setting { get; set; } = default!;
+
+    private IReadOnlyList<ConfigurationSettingHistoryDto>? _history;
+    private bool _loading;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loading = true; _error = null;
+        try
+        {
+            _history = await Api.GetConfigurationSettingHistoryAsync(Setting.Id);
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; }
+    }
+
+    private void Close() => MudDialog.Close(DialogResult.Ok(true));
+
+    private static string RenderState(bool? isSecret, string? value, string? secretRef, ConfigurationValueTypeDto? type)
+    {
+        if (isSecret is null) return "(none)";
+        var typeTag = type is null ? "" : $" [{type}]";
+        return isSecret.Value
+            ? $"secret → {secretRef ?? "?"}{typeTag}"
+            : $"\"{value ?? ""}\"{typeTag}";
+    }
+
+    private static Color KindColor(ConfigurationChangeKindDto k) => k switch
+    {
+        ConfigurationChangeKindDto.Created => Color.Success,
+        ConfigurationChangeKindDto.Updated => Color.Info,
+        ConfigurationChangeKindDto.Deleted => Color.Error,
+        _ => Color.Default,
+    };
+}
