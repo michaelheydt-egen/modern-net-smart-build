@@ -4,6 +4,7 @@ using Deployment.Contracts.Releases;
 using Google.Api.Gax;
 using Google.Api.Gax.Grpc;
 using Google.Cloud.Run.V2;
+using Grpc.Core;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -71,18 +72,31 @@ internal sealed class GoogleCloudRunDeploymentAdapter : IDeploymentAdapter
 
         var client = await GetClientAsync(cancellationToken).ConfigureAwait(false);
 
-        // --- Read the current service so we mutate-in-place rather than clobber config. ---
-        Service service;
+        // --- Read the current service so we mutate-in-place rather than clobber config.
+        //     When it doesn't exist, optionally create it (CreateServiceIfMissing). ---
+        Service? service = null;
         try
         {
             service = await client.GetServiceAsync(serviceName, CallSettings.FromCancellationToken(cancellationToken))
                 .ConfigureAwait(false);
+        }
+        catch (RpcException rpc) when (rpc.StatusCode == StatusCode.NotFound)
+        {
+            if (!opts.CreateServiceIfMissing)
+                return DeploymentExecutionOutcome.Failure(
+                    $"Cloud Run service '{serviceName}' does not exist. Create it first " +
+                    "(e.g. scripts/Bootstrap-CloudRunService.ps1) or set " +
+                    "Deployment:GoogleCloudRun:CreateServiceIfMissing=true to auto-create a bare service.");
+            // Leave service null → created below from a blank template.
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             return DeploymentExecutionOutcome.Failure(
                 $"Could not read Cloud Run service '{serviceName}': {ex.GetType().Name}: {ex.Message}");
         }
+
+        var creating = service is null;
+        service ??= new Service();
 
         // --- Decision #6: optionally promote the (Nexus) image into GAR, then deploy
         //     the GAR ref. When promotion is off, the release's ref is deployed as-is. ---
@@ -121,9 +135,16 @@ internal sealed class GoogleCloudRunDeploymentAdapter : IDeploymentAdapter
 
         try
         {
-            var operation = await client
-                .UpdateServiceAsync(service, CallSettings.FromCancellationToken(cancellationToken))
-                .ConfigureAwait(false);
+            // Create (parent + serviceId) when the service was absent, else update in place.
+            var operation = creating
+                ? await client.CreateServiceAsync(
+                        $"projects/{serviceName.ProjectId}/locations/{serviceName.LocationId}",
+                        service, serviceName.ServiceId,
+                        CallSettings.FromCancellationToken(cancellationToken))
+                    .ConfigureAwait(false)
+                : await client.UpdateServiceAsync(
+                        service, CallSettings.FromCancellationToken(cancellationToken))
+                    .ConfigureAwait(false);
 
             var completed = await operation
                 .PollUntilCompletedAsync(callSettings: CallSettings.FromCancellationToken(cancellationToken),
@@ -132,8 +153,8 @@ internal sealed class GoogleCloudRunDeploymentAdapter : IDeploymentAdapter
 
             var result = completed.Result;
             _logger.LogInformation(
-                "[cloudrun] Service '{Service}' updated. Ready revision: {Revision}.",
-                serviceName.ServiceId, result.LatestReadyRevision);
+                "[cloudrun] Service '{Service}' {Action}. Ready revision: {Revision}.",
+                serviceName.ServiceId, creating ? "created" : "updated", result.LatestReadyRevision);
 
             return DeploymentExecutionOutcome.Success;
         }

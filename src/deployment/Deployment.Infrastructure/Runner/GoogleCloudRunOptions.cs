@@ -27,6 +27,17 @@ public sealed class GoogleCloudRunOptions
     public int ReadinessPollSeconds { get; set; } = 5;
 
     /// <summary>
+    /// When true, a deploy whose target Cloud Run service does not exist yet
+    /// <em>creates</em> it (with the release image + secret env; Cloud Run platform
+    /// defaults for everything else) instead of failing. Off by default: service
+    /// provisioning — runtime service account, scaling, ingress, auth — is normally
+    /// explicit (see <c>scripts/Bootstrap-CloudRunService.ps1</c>), and an
+    /// auto-created service gets only minimal defaults. Enable for self-service /
+    /// ephemeral environments where a bare service is acceptable.
+    /// </summary>
+    public bool CreateServiceIfMissing { get; set; } = false;
+
+    /// <summary>
     /// When true, copy the release's image (a Nexus digest ref) into Google Artifact
     /// Registry before deploying, then deploy the GAR ref (decision #6). When false,
     /// the release's <c>ArtifactUri</c> is deployed as-is (it must already be
