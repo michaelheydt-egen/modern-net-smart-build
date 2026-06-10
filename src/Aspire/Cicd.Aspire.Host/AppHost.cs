@@ -8,7 +8,15 @@ var jenkinsUrl = builder.AddParameter("JenkinsUrl");
 
 // SQL Server (container) + the deployment DB. The database resource name
 // "Deployment" becomes ConnectionStrings__Deployment on referencing services.
-var sql = builder.AddSqlServer("sql").WithDataVolume();
+//
+// The sa password is an EXPLICIT, pinned parameter (Parameters:sql-password in
+// user-secrets) rather than Aspire's auto-generated one. SQL Server bakes the
+// password into the data volume on first init and never updates it, so an
+// auto-generated value that drifts leaves the volume's sa password mismatched
+// ("Login failed for user 'sa'"). Pinning it keeps the volume and the passed
+// password aligned across runs.
+var sqlPassword = builder.AddParameter("sql-password", secret: true);
+var sql = builder.AddSqlServer("sql", password: sqlPassword).WithDataVolume();
 var deploymentDb = sql.AddDatabase("Deployment");
 
 var deployment = builder.AddProject<Projects.Deployment_Api>("deployment-api")
