@@ -1,0 +1,319 @@
+@page "/ci/pipelines"
+@inject JenkinsApiClient Api
+@inject ISnackbar Snackbar
+
+<PageTitle>CI — Pipelines</PageTitle>
+
+<MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4">
+    <MudText Typo="Typo.h4">Pipelines</MudText>
+    <MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-secondary);">
+        persisted, editable orchestrator pipelines
+    </MudText>
+    <MudSpacer />
+    <MudButton Variant="Variant.Filled" Color="Color.Primary"
+               StartIcon="@Icons.Material.Filled.Add" OnClick="OpenCreate">
+        New pipeline
+    </MudButton>
+</MudStack>
+
+@if (_error is { Length: > 0 })
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="my-2">@_error</MudAlert>
+}
+
+<MudPaper Elevation="1" Class="pa-4 mb-4">
+    @if (_loading && _pipelines is null)
+    {
+        <MudProgressLinear Indeterminate="true" />
+    }
+    else if (_pipelines is { Count: 0 })
+    {
+        <MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-secondary);">
+            No pipelines yet. Click <strong>New pipeline</strong> to add one.
+        </MudText>
+    }
+    else if (_pipelines is not null)
+    {
+        <MudTable Items="@_pipelines" Dense="true" Hover="true" T="PipelineSummaryDto"
+                  OnRowClick="@(e => SelectAsync(e.Item))" RowClass="cursor-pointer">
+            <HeaderContent>
+                <MudTh>Name</MudTh>
+                <MudTh Style="width: 7rem;">Stages</MudTh>
+                <MudTh Style="width: 6rem;">Status</MudTh>
+                <MudTh Style="width: 6rem; text-align: right;"></MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>
+                    <MudText Typo="Typo.body2"><strong>@context.Name</strong></MudText>
+                    @if (!string.IsNullOrWhiteSpace(context.Description))
+                    {
+                        <MudText Typo="Typo.caption" Style="color: var(--mud-palette-text-secondary);">@context.Description</MudText>
+                    }
+                </MudTd>
+                <MudTd><MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="Color.Info">@context.StageCount</MudChip></MudTd>
+                <MudTd>
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
+                             Color="@(context.IsActive ? Color.Success : Color.Default)">
+                        @(context.IsActive ? "Active" : "Inactive")
+                    </MudChip>
+                </MudTd>
+                <MudTd Style="text-align: right;">
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                   OnClick="@(() => DeletePipelineAsync(context))" />
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    }
+</MudPaper>
+
+@* ---------- Selected pipeline: stage editor ---------- *@
+@if (_selected is { } p)
+{
+    <MudPaper Elevation="1" Class="pa-4 mb-4">
+        <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3">
+            <MudText Typo="Typo.h6">@p.Name</MudText>
+            <MudTooltip Text="Rename / edit description">
+                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="OpenRename" />
+            </MudTooltip>
+            <MudSwitch T="bool" Value="p.IsActive" Color="Color.Success" Label="Active"
+                       ValueChanged="ToggleActiveAsync" />
+            <MudSpacer />
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Add" OnClick="OpenAddStage">
+                Add stage
+            </MudButton>
+        </MudStack>
+
+        @if (p.Stages.Count == 0)
+        {
+            <MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-secondary);">
+                No stages yet. Add the first stage (e.g. <code>cicd-build</code>).
+            </MudText>
+        }
+        else
+        {
+            <MudSimpleTable Dense="true" Hover="true">
+                <thead>
+                    <tr>
+                        <th style="width: 5rem;">Order</th>
+                        <th>Job</th>
+                        <th>Upstream</th>
+                        <th style="width: 6rem;">Params</th>
+                        <th style="width: 11rem; text-align: right;"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @for (var i = 0; i < p.Stages.Count; i++)
+                    {
+                        var idx = i;
+                        var stage = p.Stages[idx];
+                        <tr>
+                            <td>@(stage.Order + 1)</td>
+                            <td style="font-family: ui-monospace, monospace;">@stage.JobName</td>
+                            <td style="font-family: ui-monospace, monospace; color: var(--mud-palette-text-secondary);">
+                                @(stage.UpstreamJobName ?? "—")
+                            </td>
+                            <td>@stage.Parameters.Count</td>
+                            <td style="text-align: right; white-space: nowrap;">
+                                <MudIconButton Icon="@Icons.Material.Filled.ArrowUpward" Size="Size.Small"
+                                               Disabled="@(idx == 0)" OnClick="@(() => MoveAsync(idx, -1))" />
+                                <MudIconButton Icon="@Icons.Material.Filled.ArrowDownward" Size="Size.Small"
+                                               Disabled="@(idx == p.Stages.Count - 1)" OnClick="@(() => MoveAsync(idx, 1))" />
+                                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
+                                               OnClick="@(() => OpenEditStage(stage))" />
+                                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                               OnClick="@(() => RemoveStageAsync(stage))" />
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        }
+    </MudPaper>
+}
+
+@* ---------- Create / rename pipeline dialog ---------- *@
+<MudDialog @bind-Visible="_showPipelineDialog" Options="_dlg">
+    <TitleContent>@(_editingPipelineId is null ? "New pipeline" : "Edit pipeline")</TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_pName" Label="Name" Required="true" />
+        <MudTextField @bind-Value="_pDescription" Label="Description" Lines="2" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _showPipelineDialog = false)">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SavePipelineAsync" Disabled="_busy">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@* ---------- Add / edit stage dialog ---------- *@
+<MudDialog @bind-Visible="_showStageDialog" Options="_dlg">
+    <TitleContent>@(_editingStageId is null ? "Add stage" : "Edit stage")</TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_sJob" Label="Jenkins job name" Required="true"
+                      HelperText="e.g. cicd-build, cicd-publish-nexus-docker" />
+        <MudTextField @bind-Value="_sUpstream" Label="Upstream job (optional)"
+                      HelperText="Its build number is forwarded as SOURCE_BUILD_NUMBER" />
+        <MudText Typo="Typo.subtitle2" Class="mt-4 mb-1">Parameters</MudText>
+        @foreach (var row in _sParams)
+        {
+            <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center" Class="mb-1">
+                <MudTextField @bind-Value="row.Key" Placeholder="key" Margin="Margin.Dense" Style="max-width: 12rem;" />
+                <MudTextField @bind-Value="row.Value" Placeholder="value" Margin="Margin.Dense" />
+                <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="@(() => _sParams.Remove(row))" />
+            </MudStack>
+        }
+        <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="@(() => _sParams.Add(new ParamRow()))">
+            Add parameter
+        </MudButton>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _showStageDialog = false)">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveStageAsync" Disabled="_busy">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private IReadOnlyList<PipelineSummaryDto>? _pipelines;
+    private PipelineDto? _selected;
+    private bool _loading;
+    private bool _busy;
+    private string? _error;
+
+    private static readonly DialogOptions _dlg = new() { MaxWidth = MaxWidth.Small, FullWidth = true };
+
+    // pipeline dialog
+    private bool _showPipelineDialog;
+    private Guid? _editingPipelineId;
+    private string _pName = "";
+    private string _pDescription = "";
+
+    // stage dialog
+    private bool _showStageDialog;
+    private Guid? _editingStageId;
+    private string _sJob = "";
+    private string _sUpstream = "";
+    private readonly List<ParamRow> _sParams = new();
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true; _error = null; StateHasChanged();
+        try { _pipelines = await Api.ListPipelinesAsync(); }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; StateHasChanged(); }
+    }
+
+    private async Task SelectAsync(PipelineSummaryDto summary)
+    {
+        try { _selected = await Api.GetPipelineAsync(summary.Id); }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+
+    // --- Pipeline create / rename / delete / active ---
+
+    private void OpenCreate()
+    {
+        _editingPipelineId = null; _pName = ""; _pDescription = ""; _showPipelineDialog = true;
+    }
+
+    private void OpenRename()
+    {
+        if (_selected is not { } p) return;
+        _editingPipelineId = p.Id; _pName = p.Name; _pDescription = p.Description ?? ""; _showPipelineDialog = true;
+    }
+
+    private async Task SavePipelineAsync()
+    {
+        _busy = true;
+        try
+        {
+            if (_editingPipelineId is { } id)
+            {
+                var dto = await Api.UpdatePipelineAsync(id, new UpdatePipelineRequest(_pName, NullIfBlank(_pDescription)));
+                _selected = dto;
+            }
+            else
+            {
+                var dto = await Api.CreatePipelineAsync(new CreatePipelineRequest(_pName, NullIfBlank(_pDescription)));
+                _selected = dto;
+            }
+            _showPipelineDialog = false;
+            await LoadAsync();
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        finally { _busy = false; }
+    }
+
+    private async Task DeletePipelineAsync(PipelineSummaryDto summary)
+    {
+        try
+        {
+            await Api.DeletePipelineAsync(summary.Id);
+            if (_selected?.Id == summary.Id) _selected = null;
+            await LoadAsync();
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+
+    private async Task ToggleActiveAsync(bool active)
+    {
+        if (_selected is not { } p) return;
+        try { _selected = await Api.SetPipelineActiveAsync(p.Id, new SetPipelineActiveRequest(active)); await LoadAsync(); }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+
+    // --- Stage add / edit / remove / reorder ---
+
+    private void OpenAddStage()
+    {
+        _editingStageId = null; _sJob = ""; _sUpstream = ""; _sParams.Clear(); _showStageDialog = true;
+    }
+
+    private void OpenEditStage(PipelineStageDto stage)
+    {
+        _editingStageId = stage.Id; _sJob = stage.JobName; _sUpstream = stage.UpstreamJobName ?? "";
+        _sParams.Clear();
+        foreach (var kv in stage.Parameters) _sParams.Add(new ParamRow { Key = kv.Key, Value = kv.Value });
+        _showStageDialog = true;
+    }
+
+    private async Task SaveStageAsync()
+    {
+        if (_selected is not { } p) return;
+        var prms = _sParams.Where(r => !string.IsNullOrWhiteSpace(r.Key))
+                           .ToDictionary(r => r.Key.Trim(), r => r.Value ?? "");
+        _busy = true;
+        try
+        {
+            _selected = _editingStageId is { } sid
+                ? await Api.UpdateStageAsync(p.Id, sid, new UpdateStageRequest(_sJob, NullIfBlank(_sUpstream), prms))
+                : await Api.AddStageAsync(p.Id, new AddStageRequest(_sJob, NullIfBlank(_sUpstream), prms));
+            _showStageDialog = false;
+            await LoadAsync();
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        finally { _busy = false; }
+    }
+
+    private async Task RemoveStageAsync(PipelineStageDto stage)
+    {
+        if (_selected is not { } p) return;
+        try { _selected = await Api.RemoveStageAsync(p.Id, stage.Id); await LoadAsync(); }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+
+    private async Task MoveAsync(int index, int delta)
+    {
+        if (_selected is not { } p) return;
+        var ids = p.Stages.Select(s => s.Id).ToList();
+        var target = index + delta;
+        if (target < 0 || target >= ids.Count) return;
+        (ids[index], ids[target]) = (ids[target], ids[index]);
+        try { _selected = await Api.ReorderStagesAsync(p.Id, new ReorderStagesRequest(ids)); }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+
+    private static string? NullIfBlank(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+
+    private sealed class ParamRow { public string Key { get; set; } = ""; public string Value { get; set; } = ""; }
+}

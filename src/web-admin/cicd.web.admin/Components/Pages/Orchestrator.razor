@@ -1,6 +1,7 @@
 @page "/"
 @page "/jenkins/orchestrator"
 @inject IPipelineRunner Runner
+@inject JenkinsApiClient Api
 @implements IDisposable
 
 <PageTitle>Orchestrator</PageTitle>
@@ -11,6 +12,17 @@
         @_snapshot.State.ToString()
     </MudChip>
     <MudSpacer />
+    <MudSelect T="Guid?" Value="_selectedId" ValueChanged="OnPipelineSelectedAsync"
+               Label="Pipeline" Dense="true" Variant="Variant.Outlined"
+               Style="min-width: 16rem;" Disabled="@(_snapshot.State == PipelineState.Running)">
+        @foreach (var p in _pipelines)
+        {
+            <MudSelectItem T="Guid?" Value="@((Guid?)p.Id)">@p.Name (@p.StageCount)</MudSelectItem>
+        }
+    </MudSelect>
+    <MudTooltip Text="Manage pipelines">
+        <MudIconButton Icon="@Icons.Material.Filled.Edit" Href="/ci/pipelines" />
+    </MudTooltip>
     @if (_snapshot.State == PipelineState.Running)
     {
         <MudButton Color="Color.Error"
@@ -25,6 +37,7 @@
         <MudButton Color="Color.Primary"
                    Variant="Variant.Filled"
                    StartIcon="@Icons.Material.Filled.PlayArrow"
+                   Disabled="@(_steps.Count == 0)"
                    OnClick="OnRun">
             Run Pipeline
         </MudButton>
@@ -57,6 +70,10 @@
             </tr>
         </thead>
         <tbody>
+            @if (_steps.Count == 0)
+            {
+                <tr><td colspan="5" style="color: var(--mud-palette-text-secondary);">No pipeline selected, or it has no stages.</td></tr>
+            }
             @foreach (var step in _steps)
             {
                 var view = StepStatusFor(step.JobName);
@@ -120,7 +137,11 @@
 </MudPaper>
 
 @code {
-    private static readonly IReadOnlyList<PipelineStep> _steps = DefaultPipelines.CicdMain();
+    // Steps are loaded from the selected persisted pipeline (Jenkins.Api). Falls back to
+    // the built-in CICD Main if the service is unreachable so the page still runs.
+    private IReadOnlyList<PipelineStep> _steps = Array.Empty<PipelineStep>();
+    private IReadOnlyList<PipelineSummaryDto> _pipelines = Array.Empty<PipelineSummaryDto>();
+    private Guid? _selectedId;
 
     private PipelineSnapshot _snapshot = new(
     PipelineState.Idle,
@@ -129,10 +150,58 @@
     Logs: new Dictionary<string, string>(),
     Result: null);
 
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
         _snapshot = Runner.Snapshot;
         Runner.StateChanged += OnStateChanged;
+        await LoadPipelinesAsync();
+    }
+
+    private async Task LoadPipelinesAsync()
+    {
+        try
+        {
+            _pipelines = await Api.ListPipelinesAsync();
+        }
+        catch
+        {
+            _pipelines = Array.Empty<PipelineSummaryDto>();
+        }
+
+        // Prefer the first active pipeline, else the first one.
+        var initial = _pipelines.FirstOrDefault(p => p.IsActive) ?? _pipelines.FirstOrDefault();
+        if (initial is not null)
+        {
+            await OnPipelineSelectedAsync(initial.Id);
+        }
+        else
+        {
+            // No persisted pipelines reachable — fall back to the built-in default.
+            _steps = DefaultPipelines.CicdMain();
+        }
+    }
+
+    private async Task OnPipelineSelectedAsync(Guid? id)
+    {
+        _selectedId = id;
+        if (id is not { } pid) { _steps = Array.Empty<PipelineStep>(); return; }
+        try
+        {
+            var dto = await Api.GetPipelineAsync(pid);
+            _steps = dto is null
+                ? Array.Empty<PipelineStep>()
+                : dto.Stages
+                     .Select(s => new PipelineStep(
+                         s.JobName,
+                         string.IsNullOrWhiteSpace(s.UpstreamJobName) ? null : s.UpstreamJobName,
+                         s.Parameters.Count > 0 ? new Dictionary<string, string>(s.Parameters) : null))
+                     .ToList();
+        }
+        catch
+        {
+            _steps = DefaultPipelines.CicdMain();
+        }
+        StateHasChanged();
     }
 
     private void OnStateChanged()
