@@ -41,6 +41,16 @@ public sealed record RegisterRepositoryRequest(
     string CiJobName,
     string BaseVersion);
 
+public sealed record UpdateRepositoryRequest(
+    string Name,
+    string GitUrl,
+    RepositoryProviderDto Provider,
+    string DefaultBranch,
+    string CiJobName,
+    string BaseVersion);
+
+public sealed record SetRepositoryActiveRequest(bool IsActive);
+
 public sealed record MapComponentRequest(
     string ContainerName,
     Guid DeployableUnitId,

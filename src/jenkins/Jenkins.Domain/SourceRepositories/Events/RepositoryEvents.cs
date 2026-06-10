@@ -12,6 +12,16 @@ public sealed record RepositoryRegistered(
     string BaseVersion,
     DateTimeOffset OccurredAtUtc) : IDomainEvent;
 
+public sealed record RepositoryDetailsUpdated(
+    Guid RepositoryId,
+    string Name,
+    string GitUrl,
+    RepositoryProvider Provider,
+    string DefaultBranch,
+    string CiJobName,
+    string BaseVersion,
+    DateTimeOffset OccurredAtUtc) : IDomainEvent;
+
 public sealed record RepositoryDeactivated(
     Guid RepositoryId,
     DateTimeOffset OccurredAtUtc) : IDomainEvent;

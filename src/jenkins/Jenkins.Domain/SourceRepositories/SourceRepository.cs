@@ -78,6 +78,43 @@ public sealed class SourceRepository : AggregateRoot<Guid>
             Id, Name, GitUrl, Provider, DefaultBranch, CiJobName, BaseVersion, createdAtUtc));
     }
 
+    // --- Details ---
+
+    /// <summary>
+    /// Update the editable identity/CI fields. Same guards as the ctor. The
+    /// unique-name invariant (vs. <em>other</em> repos) is enforced by the handler.
+    /// </summary>
+    public void UpdateDetails(
+        string name,
+        string gitUrl,
+        RepositoryProvider provider,
+        string defaultBranch,
+        string ciJobName,
+        string baseVersion,
+        DateTimeOffset occurredAtUtc)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            throw new ArgumentException("Name cannot be empty.", nameof(name));
+        if (string.IsNullOrWhiteSpace(gitUrl))
+            throw new ArgumentException("GitUrl cannot be empty.", nameof(gitUrl));
+        if (string.IsNullOrWhiteSpace(defaultBranch))
+            throw new ArgumentException("DefaultBranch cannot be empty.", nameof(defaultBranch));
+        if (string.IsNullOrWhiteSpace(ciJobName))
+            throw new ArgumentException("CiJobName cannot be empty.", nameof(ciJobName));
+        if (string.IsNullOrWhiteSpace(baseVersion))
+            throw new ArgumentException("BaseVersion cannot be empty.", nameof(baseVersion));
+
+        Name = name.Trim();
+        GitUrl = gitUrl.Trim();
+        Provider = provider;
+        DefaultBranch = defaultBranch.Trim();
+        CiJobName = ciJobName.Trim();
+        BaseVersion = baseVersion.Trim();
+
+        RaiseEvent(new RepositoryDetailsUpdated(
+            Id, Name, GitUrl, Provider, DefaultBranch, CiJobName, BaseVersion, occurredAtUtc));
+    }
+
     // --- Deployment-component mappings ---
 
     /// <summary>

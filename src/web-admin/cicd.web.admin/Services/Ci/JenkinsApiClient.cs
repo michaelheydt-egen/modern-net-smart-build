@@ -47,6 +47,12 @@ public sealed class JenkinsApiClient
     public Task<RepositoryDto> RegisterRepositoryAsync(RegisterRepositoryRequest body, CancellationToken ct = default)
         => PostJsonAsync<RegisterRepositoryRequest, RepositoryDto>("api/jenkins/repositories", body, ct);
 
+    public Task<RepositoryDto> UpdateRepositoryAsync(Guid id, UpdateRepositoryRequest body, CancellationToken ct = default)
+        => PutJsonAsync<UpdateRepositoryRequest, RepositoryDto>($"api/jenkins/repositories/{id}", body, ct);
+
+    public Task<RepositoryDto> SetRepositoryActiveAsync(Guid id, SetRepositoryActiveRequest body, CancellationToken ct = default)
+        => PostJsonAsync<SetRepositoryActiveRequest, RepositoryDto>($"api/jenkins/repositories/{id}/active", body, ct);
+
     public Task<DeployableComponentDto> MapComponentAsync(Guid repositoryId, MapComponentRequest body, CancellationToken ct = default)
         => PostJsonAsync<MapComponentRequest, DeployableComponentDto>($"api/jenkins/repositories/{repositoryId}/components", body, ct);
 
@@ -139,6 +145,14 @@ public sealed class JenkinsApiClient
     private async Task<TResp> PostJsonAsync<TBody, TResp>(string url, TBody body, CancellationToken ct)
     {
         using var resp = await _http.PostAsJsonAsync(url, body, Json, ct).ConfigureAwait(false);
+        await EnsureOkAsync(resp, ct).ConfigureAwait(false);
+        var parsed = await resp.Content.ReadFromJsonAsync<TResp>(Json, ct).ConfigureAwait(false);
+        return parsed ?? throw new JenkinsApiException(resp.StatusCode, $"Empty body from {url}");
+    }
+
+    private async Task<TResp> PutJsonAsync<TBody, TResp>(string url, TBody body, CancellationToken ct)
+    {
+        using var resp = await _http.PutAsJsonAsync(url, body, Json, ct).ConfigureAwait(false);
         await EnsureOkAsync(resp, ct).ConfigureAwait(false);
         var parsed = await resp.Content.ReadFromJsonAsync<TResp>(Json, ct).ConfigureAwait(false);
         return parsed ?? throw new JenkinsApiException(resp.StatusCode, $"Empty body from {url}");
