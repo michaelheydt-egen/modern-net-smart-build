@@ -34,34 +34,11 @@ builder.Services.AddSingleton<IJenkinsClient>(sp => new JenkinsClient(sp.GetRequ
 builder.Services.AddSingleton<IPipelineOrchestrator, PipelineOrchestrator>();
 builder.Services.AddSingleton<IPipelineRunner, PipelineRunner>();
 
-// Build history. When BuildSync:Enabled = true, we mirror Jenkins into a local
-// SQLite DB (bind-mount the path in docker-compose) and the UI reads from there
-// with live-Jenkins fallback for very recent builds. When disabled (default),
-// every read is a direct Jenkins HTTP call.
-var buildSyncOptions = builder.Configuration.GetSection("BuildSync").Get<BuildSyncOptions>()
-                       ?? new BuildSyncOptions();
-builder.Services.AddSingleton(buildSyncOptions);
-builder.Services.AddSingleton<JenkinsLiveBuildStore>();   // shared by both paths (fallback for SQLite store)
-
-if (buildSyncOptions.Enabled)
-{
-    // Resolve the DB path to an absolute one so EF / SQLite don't depend on the
-    // CWD at first connect. Create the parent dir if needed — common operator pain.
-    var dbPath = Path.GetFullPath(buildSyncOptions.DbPath);
-    var dbDir  = Path.GetDirectoryName(dbPath);
-    if (!string.IsNullOrEmpty(dbDir)) Directory.CreateDirectory(dbDir);
-
-    builder.Services.AddDbContextFactory<BuildSyncDbContext>(o =>
-        o.UseSqlite($"Data Source={dbPath}"));
-
-    builder.Services.AddSingleton<SqliteBuildStore>();
-    builder.Services.AddSingleton<IBuildStore>(sp => sp.GetRequiredService<SqliteBuildStore>());
-    builder.Services.AddHostedService<BuildSyncService>();
-}
-else
-{
-    builder.Services.AddSingleton<IBuildStore>(sp => sp.GetRequiredService<JenkinsLiveBuildStore>());
-}
+// Build history reads come straight from Jenkins (live mode). Persisted build
+// history is now owned by the Jenkins CI service (Jenkins.Api) — consumed by the
+// CI pages — so the old local SQLite build mirror (BuildSync) has been retired.
+builder.Services.AddSingleton<JenkinsLiveBuildStore>();
+builder.Services.AddSingleton<IBuildStore>(sp => sp.GetRequiredService<JenkinsLiveBuildStore>());
 
 // Health probe settings — configurable via Jenkins:Health:{PollIntervalSeconds,ProbeTimeoutSeconds}.
 var healthOptions = builder.Configuration.GetSection("Jenkins:Health").Get<JenkinsHealthOptions>()
@@ -121,18 +98,6 @@ builder.Services.AddHttpClient<JenkinsApiClient>(c =>
 });
 
 var app = builder.Build();
-
-// When build-sync is on, apply any pending EF Core migrations at startup so a
-// fresh deploy or schema bump doesn't require an out-of-band `dotnet ef database
-// update` step. Failures here are fatal — the sync service would crash on first
-// query otherwise, and surfacing it in the host startup log is more useful.
-if (buildSyncOptions.Enabled)
-{
-    using var scope = app.Services.CreateScope();
-    var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<BuildSyncDbContext>>();
-    await using var db = await dbFactory.CreateDbContextAsync();
-    await db.Database.MigrateAsync();
-}
 
 if (!app.Environment.IsDevelopment())
 {

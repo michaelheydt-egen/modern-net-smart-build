@@ -1,7 +1,4 @@
 @page "/settings"
-@inject IBuildStore Store
-@inject BuildSyncOptions SyncOptions
-@implements IDisposable
 
 <PageTitle>Settings</PageTitle>
 
@@ -12,106 +9,14 @@
 
 <MudPaper Elevation="1" Class="pa-4 mb-4">
     <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-3">
-        <MudIcon Icon="@(SyncOptions.Enabled ? Icons.Material.Filled.CloudDone : Icons.Material.Filled.CloudOff)"
-                 Color="Color.Primary" />
-        <MudText Typo="Typo.h6">Build sync</MudText>
-        <MudChip T="string" Size="Size.Small"
-                 Color="@(SyncOptions.Enabled ? Color.Success : Color.Default)"
-                 Variant="Variant.Filled">
-            @(SyncOptions.Enabled ? "Mirror" : "Live")
-        </MudChip>
+        <MudIcon Icon="@Icons.Material.Filled.CloudQueue" Color="Color.Primary" />
+        <MudText Typo="Typo.h6">Build history</MudText>
+        <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Filled">Live</MudChip>
     </MudStack>
-
-    @if (SyncOptions.Enabled)
-    {
-        <MudText Typo="Typo.body2" Class="mb-3" Style="color: var(--mud-palette-text-secondary);">
-            Jenkins build history is mirrored to a local SQLite database. The Builds /
-            BuildDetails pages read from there with live-Jenkins fallback for very recent
-            builds the sync hasn't picked up yet.
-        </MudText>
-
-        <MudText Typo="Typo.subtitle2" Class="mb-2">Sync status</MudText>
-        @if (_status is null)
-        {
-            <DetailRow Label="State" Value="starting — first tick pending" />
-        }
-        else if (_status.LastError is { Length: > 0 } err)
-        {
-            <DetailRow Label="State" Value="error" />
-            <DetailRow Label="Last error" Value="@err" Mono="true" />
-            <DetailRow Label="Last attempt" Value="@FormatAbsolute(_status.LastSyncedAt)" />
-        }
-        else if (_status.LastSyncedAt == default)
-        {
-            <DetailRow Label="State" Value="starting — first tick pending" />
-        }
-        else
-        {
-            <DetailRow Label="State" Value="healthy" />
-            <DetailRow Label="Last synced" Value="@($"{FormatAbsolute(_status.LastSyncedAt)} ({FormatRelative(_status.LastSyncedAt)})")" />
-            <DetailRow Label="Builds tracked" Value="@_status.BuildsTracked.ToString()" />
-        }
-
-        <MudText Typo="Typo.subtitle2" Class="mt-4 mb-2">Configuration</MudText>
-        <DetailRow Label="Jobs"                 Value="@string.Join(", ", SyncOptions.Jobs)" Mono="true" />
-        <DetailRow Label="DB path"              Value="@SyncOptions.DbPath" Mono="true" />
-        <DetailRow Label="Poll interval"        Value="@($"{SyncOptions.PollIntervalSeconds}s")" />
-        <DetailRow Label="Backfill on first tick" Value="@SyncOptions.BackfillCount.ToString()" />
-        <DetailRow Label="Builds fetched per tick" Value="@SyncOptions.PerJobFetchCount.ToString()" />
-        <DetailRow Label="Reconcile deleted"   Value="@(SyncOptions.ReconcileDeleted ? "yes — local rows for Jenkins-deleted builds are pruned each tick" : "no — local history outlives Jenkins's retention")" />
-    }
-    else
-    {
-        <MudText Typo="Typo.body2" Class="mb-3" Style="color: var(--mud-palette-text-secondary);">
-            Live mode — every Builds / BuildDetails read goes straight to Jenkins.
-            History is bounded by Jenkins's own retention; the WebUI keeps no copy.
-        </MudText>
-
-        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">
-            <MudText Typo="Typo.body2">
-                Enable the SQLite mirror by setting <code>BuildSync__Enabled=true</code>
-                (env var) or <code>BuildSync:Enabled: true</code> (appsettings.json),
-                then restart the WebUI. Full setup notes in
-                <code>docs/build-sync.md</code>.
-            </MudText>
-        </MudAlert>
-    }
+    <MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-secondary);">
+        The Builds / BuildDetails pages read directly from Jenkins. Persisted build
+        history, artifact provenance, and deployment handoffs are now owned by the
+        Jenkins CI service — see the <MudLink Href="ci/repositories">CI</MudLink>
+        section. The old local SQLite build mirror has been retired.
+    </MudText>
 </MudPaper>
-
-@code {
-    private Timer? _timer;
-    private BuildSyncStatus? _status;
-
-    protected override void OnInitialized()
-    {
-        _status = Store.Status;
-        // Refresh every 5s so the relative timestamp ticks without a page reload.
-        _timer = new Timer(_ => _ = InvokeAsync(() =>
-        {
-            _status = Store.Status;
-            StateHasChanged();
-        }), null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
-    }
-
-    public void Dispose() => _timer?.Dispose();
-
-    private static string FormatAbsolute(DateTimeOffset t)
-    {
-        if (t == default) return "—";
-        return t.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss");
-    }
-
-    private static string FormatRelative(DateTimeOffset t)
-    {
-        if (t == default) return "—";
-        var ago = DateTimeOffset.UtcNow - t;
-        return ago switch
-        {
-            { TotalSeconds: < 5 }  => "just now",
-            { TotalSeconds: < 60 } => $"{(int)ago.TotalSeconds}s ago",
-            { TotalMinutes: < 60 } => $"{(int)ago.TotalMinutes}m ago",
-            { TotalHours: < 24 }   => $"{(int)ago.TotalHours}h ago",
-            _                      => t.LocalDateTime.ToString("yyyy-MM-dd HH:mm")
-        };
-    }
-}
