@@ -3,6 +3,7 @@ using Jenkins.Api.Endpoints;
 using Jenkins.Application;
 using Jenkins.Infrastructure;
 using Jenkins.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 using Wolverine;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -37,6 +38,14 @@ builder.Host.UseWolverine(opts =>
 });
 
 var app = builder.Build();
+
+// Apply EF migrations at startup when Database:AutoMigrate is set (compose/dev
+// convenience). SQLite is local, so no retry needed.
+if (builder.Configuration.GetValue<bool>("Database:AutoMigrate"))
+{
+    using var scope = app.Services.CreateScope();
+    await scope.ServiceProvider.GetRequiredService<JenkinsCiDbContext>().Database.MigrateAsync();
+}
 
 if (app.Environment.IsDevelopment())
 {

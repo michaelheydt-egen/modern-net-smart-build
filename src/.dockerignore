@@ -1,0 +1,18 @@
+# Build context is src/ for the service images; keep build artifacts and IDE
+# cruft out of the context so layer caching works and images stay small.
+**/bin
+**/obj
+**/.vs
+**/.vscode
+**/.idea
+**/.git
+**/.gitignore
+**/.dockerignore
+**/*.user
+**/*.suo
+**/node_modules
+**/TestResults
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/.DS_Store

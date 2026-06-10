@@ -3,6 +3,7 @@ using Deployment.Api.Endpoints;
 using Deployment.Application;
 using Deployment.Infrastructure;
 using Deployment.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 using Wolverine;
 using Wolverine.EntityFrameworkCore;
 using Wolverine.SqlServer;
@@ -52,6 +53,23 @@ builder.Host.UseWolverine(opts =>
 });
 
 var app = builder.Build();
+
+// Apply EF migrations at startup when Database:AutoMigrate is set (compose/dev
+// convenience). Retries so a not-yet-ready SQL Server doesn't crash the boot.
+if (builder.Configuration.GetValue<bool>("Database:AutoMigrate"))
+{
+    using var scope = app.Services.CreateScope();
+    var db = scope.ServiceProvider.GetRequiredService<DeploymentDbContext>();
+    for (var attempt = 1; ; attempt++)
+    {
+        try { await db.Database.MigrateAsync(); break; }
+        catch (Exception ex) when (attempt < 12)
+        {
+            app.Logger.LogWarning(ex, "DB migrate attempt {Attempt} failed; retrying in 5s…", attempt);
+            await Task.Delay(TimeSpan.FromSeconds(5));
+        }
+    }
+}
 
 if (app.Environment.IsDevelopment())
 {

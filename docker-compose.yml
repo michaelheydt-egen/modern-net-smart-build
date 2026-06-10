@@ -1,0 +1,87 @@
+name: cicd
+
+# One-command bring-up of the platform: SQL Server (for the deployment service) +
+# the three .NET services. Copy .env.example to .env and set JENKINS_API_TOKEN
+# (the admin UI requires it), then: docker compose up --build
+#
+# Host ports match the local dev defaults:
+#   web-admin       http://localhost:8090
+#   deployment-api  http://localhost:9601
+#   jenkins-api     http://localhost:5310
+#
+# Internally the services listen on :8080 and reach each other by service name.
+
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: ${SA_PASSWORD:-Your_Strong_Pass123}
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqlserver-data:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -Q 'SELECT 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  deployment-api:
+    build:
+      context: ./src
+      dockerfile: deployment/Deployment.Api/Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      Database__AutoMigrate: "true"
+      ConnectionStrings__Deployment: "Server=sqlserver;Database=Deployment;User Id=sa;Password=${SA_PASSWORD:-Your_Strong_Pass123};TrustServerCertificate=True;MultipleActiveResultSets=True"
+    ports:
+      - "9601:8080"
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+
+  jenkins-api:
+    build:
+      context: ./src
+      dockerfile: jenkins/Jenkins.Api/Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      Database__AutoMigrate: "true"
+      ConnectionStrings__JenkinsCi: "Data Source=/app/data/jenkins-ci.db"
+      Deployment__ApiBaseUrl: "http://deployment-api:8080"
+      Jenkins__Url: ${JENKINS_URL:-http://jenkins:8080}
+      Jenkins__User: ${JENKINS_USER:-admin}
+      Jenkins__ApiToken: ${JENKINS_API_TOKEN:-}
+      Nexus__Url: ${NEXUS_URL:-http://nexus:8081}
+      Nexus__Password: ${NEXUS_PASSWORD:-}
+      Nexus__DockerRegistryHost: ${NEXUS_DOCKER_HOST:-nexus:8082}
+    ports:
+      - "5310:8080"
+    volumes:
+      - jenkins-ci-data:/app/data
+    depends_on:
+      - deployment-api
+
+  web-admin:
+    build:
+      context: ./src
+      dockerfile: web-admin/cicd.web.admin/Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      Deployment__Api__BaseUrl: "http://deployment-api:8080"
+      JenkinsApi__BaseUrl: "http://jenkins-api:8080"
+      Jenkins__Url: ${JENKINS_URL:-http://jenkins:8080}
+      Jenkins__User: ${JENKINS_USER:-admin}
+      # The admin UI fails to start without a Jenkins token (by design).
+      Jenkins__ApiToken: ${JENKINS_API_TOKEN:?set JENKINS_API_TOKEN in .env}
+    ports:
+      - "8090:8080"
+    depends_on:
+      - deployment-api
+      - jenkins-api
+
+volumes:
+  sqlserver-data:
+  jenkins-ci-data:
