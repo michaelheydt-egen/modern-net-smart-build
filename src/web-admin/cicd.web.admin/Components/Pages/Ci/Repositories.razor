@@ -79,6 +79,16 @@
                                OnClick="@(() => OpenMap(context))">
                         Map
                     </MudButton>
+                    <MudTooltip Text="Edit">
+                        <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
+                                       OnClick="@(() => OpenEdit(context))" />
+                    </MudTooltip>
+                    <MudTooltip Text="@(context.IsActive ? "Deactivate" : "Activate")">
+                        <MudIconButton Size="Size.Small"
+                                       Icon="@(context.IsActive ? Icons.Material.Filled.ToggleOn : Icons.Material.Filled.ToggleOff)"
+                                       Color="@(context.IsActive ? Color.Success : Color.Default)"
+                                       OnClick="@(() => ToggleActiveAsync(context))" />
+                    </MudTooltip>
                 </MudTd>
             </RowTemplate>
             <ChildRowContent>
@@ -109,9 +119,9 @@
     }
 </MudPaper>
 
-@* ---- Register dialog ---- *@
+@* ---- Register / edit dialog ---- *@
 <MudDialog @bind-Visible="_showRegister" Options="_dialogOptions">
-    <TitleContent>Register repository</TitleContent>
+    <TitleContent>@(_editingId is null ? "Register repository" : "Edit repository")</TitleContent>
     <DialogContent>
         <MudTextField @bind-Value="_reg.Name" Label="Name" Required="true" />
         <MudTextField @bind-Value="_reg.GitUrl" Label="Git URL" Required="true" />
@@ -127,7 +137,9 @@
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="@(() => _showRegister = false)">Cancel</MudButton>
-        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="RegisterAsync" Disabled="_busy">Register</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync" Disabled="_busy">
+            @(_editingId is null ? "Register" : "Save")
+        </MudButton>
     </DialogActions>
 </MudDialog>
 
@@ -161,8 +173,9 @@
 
     private static readonly DialogOptions _dialogOptions = new() { MaxWidth = MaxWidth.Small, FullWidth = true };
 
-    // Register form
+    // Register / edit form (_editingId null = register, set = update)
     private bool _showRegister;
+    private Guid? _editingId;
     private RegisterForm _reg = new();
 
     // Map form
@@ -194,18 +207,43 @@
 
     private void OpenRegister()
     {
+        _editingId = null;
         _reg = new RegisterForm();
         _showRegister = true;
     }
 
-    private async Task RegisterAsync()
+    private void OpenEdit(RepositoryDto repo)
+    {
+        _editingId = repo.Id;
+        _reg = new RegisterForm
+        {
+            Name = repo.Name,
+            GitUrl = repo.GitUrl,
+            Provider = repo.Provider,
+            DefaultBranch = repo.DefaultBranch,
+            CiJobName = repo.CiJobName,
+            BaseVersion = repo.BaseVersion,
+        };
+        _showRegister = true;
+    }
+
+    private async Task SaveAsync()
     {
         _busy = true;
         try
         {
-            await Api.RegisterRepositoryAsync(new RegisterRepositoryRequest(
-                _reg.Name, _reg.GitUrl, _reg.Provider, _reg.DefaultBranch, _reg.CiJobName, _reg.BaseVersion));
-            Snackbar.Add($"Registered '{_reg.Name}'.", Severity.Success);
+            if (_editingId is { } id)
+            {
+                await Api.UpdateRepositoryAsync(id, new UpdateRepositoryRequest(
+                    _reg.Name, _reg.GitUrl, _reg.Provider, _reg.DefaultBranch, _reg.CiJobName, _reg.BaseVersion));
+                Snackbar.Add($"Updated '{_reg.Name}'.", Severity.Success);
+            }
+            else
+            {
+                await Api.RegisterRepositoryAsync(new RegisterRepositoryRequest(
+                    _reg.Name, _reg.GitUrl, _reg.Provider, _reg.DefaultBranch, _reg.CiJobName, _reg.BaseVersion));
+                Snackbar.Add($"Registered '{_reg.Name}'.", Severity.Success);
+            }
             _showRegister = false;
             await LoadAsync();
         }
@@ -214,6 +252,20 @@
             Snackbar.Add(ex.Message, Severity.Error);
         }
         finally { _busy = false; }
+    }
+
+    private async Task ToggleActiveAsync(RepositoryDto repo)
+    {
+        try
+        {
+            await Api.SetRepositoryActiveAsync(repo.Id, new SetRepositoryActiveRequest(!repo.IsActive));
+            Snackbar.Add($"{(repo.IsActive ? "Deactivated" : "Activated")} '{repo.Name}'.", Severity.Success);
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
     }
 
     private void OpenMap(RepositoryDto repo)

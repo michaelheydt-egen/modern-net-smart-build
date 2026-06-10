@@ -22,6 +22,8 @@ public static class DependencyInjection
 
         // Repositories (SourceRepository) handlers.
         services.AddScoped<RegisterRepositoryHandler>();
+        services.AddScoped<UpdateRepositoryHandler>();
+        services.AddScoped<SetRepositoryActiveHandler>();
         services.AddScoped<MapComponentHandler>();
         services.AddScoped<ListRepositoriesHandler>();
         services.AddScoped<GetRepositoryByIdHandler>();

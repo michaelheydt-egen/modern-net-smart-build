@@ -52,6 +52,32 @@ public static class RepositoriesEndpoints
             });
         });
 
+        group.MapPut("{id:guid}", async (
+            Guid id,
+            UpdateRepositoryRequest body,
+            UpdateRepositoryHandler handler,
+            IValidator<UpdateRepositoryCommand> validator,
+            CancellationToken ct) =>
+        {
+            var cmd = new UpdateRepositoryCommand(
+                id, body.Name, body.GitUrl, body.Provider,
+                body.DefaultBranch, body.CiJobName, body.BaseVersion);
+            return await ValidateAndRun(validator, cmd, ct, async () =>
+                Results.Ok(await handler.HandleAsync(cmd, ct)));
+        });
+
+        group.MapPost("{id:guid}/active", async (
+            Guid id,
+            SetRepositoryActiveRequest body,
+            SetRepositoryActiveHandler handler,
+            IValidator<SetRepositoryActiveCommand> validator,
+            CancellationToken ct) =>
+        {
+            var cmd = new SetRepositoryActiveCommand(id, body.IsActive);
+            return await ValidateAndRun(validator, cmd, ct, async () =>
+                Results.Ok(await handler.HandleAsync(cmd, ct)));
+        });
+
         // --- Component mapping (upsert by container name) ---
 
         group.MapPost("{id:guid}/components", async (
