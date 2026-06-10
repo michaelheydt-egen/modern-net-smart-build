@@ -10,6 +10,8 @@ using Wolverine.SqlServer;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.AddServiceDefaults();
+
 builder.Services.AddOpenApi();
 
 // Match the Blazor client's JSON shape: enums on the wire are strings
@@ -54,6 +56,8 @@ builder.Host.UseWolverine(opts =>
 
 var app = builder.Build();
 
+app.MapDefaultEndpoints();
+
 // Apply EF migrations at startup when Database:AutoMigrate is set (compose/dev
 // convenience). Retries so a not-yet-ready SQL Server doesn't crash the boot.
 if (builder.Configuration.GetValue<bool>("Database:AutoMigrate"))
@@ -76,7 +80,10 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
-app.UseHttpsRedirection();
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
 
 app.MapGet("/", () => Results.Ok(new
 {

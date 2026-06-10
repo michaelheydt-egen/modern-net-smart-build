@@ -12,6 +12,8 @@ using MudBlazor.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.AddServiceDefaults();
+
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
@@ -99,17 +101,20 @@ builder.Services.AddHttpClient<JenkinsApiClient>(c =>
 
 var app = builder.Build();
 
+// Aspire defaults: /alive (liveness — also what the Dockerfile HEALTHCHECK hits) + /health.
+app.MapDefaultEndpoints();
+
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
     app.UseHsts();
 }
 app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
-app.UseHttpsRedirection();
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
 app.UseAntiforgery();
-
-// Health endpoint for the Dockerfile HEALTHCHECK.
-app.MapGet("/alive", () => Results.Ok("ok"));
 
 app.MapStaticAssets();
 app.MapRazorComponents<App>()

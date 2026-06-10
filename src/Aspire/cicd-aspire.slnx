@@ -1,0 +1,18 @@
+<Solution>
+  <Project Path="../deployment/Deployment.Api/Deployment.Api.csproj" />
+  <Project Path="../deployment/Deployment.Application/Deployment.Application.csproj" />
+  <Project Path="../deployment/Deployment.Contracts/Deployment.Contracts.csproj" />
+  <Project Path="../deployment/Deployment.Domain/Deployment.Domain.csproj" />
+  <Project Path="../deployment/Deployment.Infrastructure/Deployment.Infrastructure.csproj" />
+  <Project Path="../jenkins/Jenkins.Api/Jenkins.Api.csproj" />
+  <Project Path="../jenkins/Jenkins.Application/Jenkins.Application.csproj" />
+  <Project Path="../jenkins/Jenkins.Client/Jenkins.Client.csproj" />
+  <Project Path="../jenkins/Jenkins.Contracts/Jenkins.Contracts.csproj" />
+  <Project Path="../jenkins/Jenkins.Domain/Jenkins.Domain.csproj" />
+  <Project Path="../jenkins/Jenkins.Infrastructure/Jenkins.Infrastructure.csproj" />
+  <Project Path="../jenkins/Jenkins.Orchestrator.Abstractions/Jenkins.Orchestrator.Abstractions.csproj" />
+  <Project Path="../jenkins/Jenkins.Orchestrator/Jenkins.Orchestrator.csproj" />
+  <Project Path="../web-admin/cicd.web.admin/cicd.web.admin.csproj" />
+  <Project Path="Cicd.Aspire.Host/Cicd.Aspire.Host.csproj" />
+  <Project Path="Cicd.Aspire.ServiceDefaults/Cicd.Aspire.ServiceDefaults.csproj" />
+</Solution>

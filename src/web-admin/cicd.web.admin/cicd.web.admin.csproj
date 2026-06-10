@@ -9,6 +9,7 @@
          NOT referenced from here. -->
     <ProjectReference Include="..\..\deployment\Deployment.Contracts\Deployment.Contracts.csproj" />
     <ProjectReference Include="..\..\jenkins\Jenkins.Contracts\Jenkins.Contracts.csproj" />
+    <ProjectReference Include="..\..\Aspire\Cicd.Aspire.ServiceDefaults\Cicd.Aspire.ServiceDefaults.csproj" />
   </ItemGroup>
 
   <ItemGroup>

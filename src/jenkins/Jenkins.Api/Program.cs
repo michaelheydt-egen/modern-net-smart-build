@@ -8,6 +8,8 @@ using Wolverine;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.AddServiceDefaults();
+
 builder.Services.AddOpenApi();
 
 // Enums on the wire are strings (BuildStatusDto = "Succeeded", not 2) — matches the
@@ -39,6 +41,8 @@ builder.Host.UseWolverine(opts =>
 
 var app = builder.Build();
 
+app.MapDefaultEndpoints();
+
 // Apply EF migrations at startup when Database:AutoMigrate is set (compose/dev
 // convenience). SQLite is local, so no retry needed.
 if (builder.Configuration.GetValue<bool>("Database:AutoMigrate"))
@@ -52,7 +56,10 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
-app.UseHttpsRedirection();
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
 
 app.MapGet("/", () => Results.Ok(new
 {

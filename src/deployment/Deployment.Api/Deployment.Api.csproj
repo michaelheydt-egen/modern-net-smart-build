@@ -9,6 +9,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Deployment.Application\Deployment.Application.csproj" />
     <ProjectReference Include="..\Deployment.Infrastructure\Deployment.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\Aspire\Cicd.Aspire.ServiceDefaults\Cicd.Aspire.ServiceDefaults.csproj" />
   </ItemGroup>
 
   <ItemGroup>

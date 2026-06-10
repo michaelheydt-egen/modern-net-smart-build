@@ -9,6 +9,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Jenkins.Application\Jenkins.Application.csproj" />
     <ProjectReference Include="..\Jenkins.Infrastructure\Jenkins.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\Aspire\Cicd.Aspire.ServiceDefaults\Cicd.Aspire.ServiceDefaults.csproj" />
   </ItemGroup>
 
   <ItemGroup>
