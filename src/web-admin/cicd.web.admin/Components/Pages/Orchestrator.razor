@@ -1,20 +1,20 @@
 @page "/"
 @page "/jenkins/orchestrator"
-@inject IPipelineRunner Runner
+@using System.Text
+@using Microsoft.AspNetCore.SignalR.Client
 @inject JenkinsApiClient Api
-@implements IDisposable
+@inject NavigationManager Nav
+@implements IAsyncDisposable
 
 <PageTitle>Orchestrator</PageTitle>
 
 <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4">
     <MudText Typo="Typo.h4">Orchestrator</MudText>
-    <MudChip T="string" Color="@StateChipColor()" Variant="Variant.Filled" Size="Size.Small">
-        @_snapshot.State.ToString()
-    </MudChip>
+    <MudChip T="string" Color="@StateChipColor()" Variant="Variant.Filled" Size="Size.Small">@_state</MudChip>
     <MudSpacer />
     <MudSelect T="Guid?" Value="_selectedRepoId" ValueChanged="OnRepoSelected"
                Label="Repository" Dense="true" Variant="Variant.Outlined"
-               Style="min-width: 16rem;" Disabled="@(_snapshot.State == PipelineState.Running)">
+               Style="min-width: 16rem;" Disabled="@(_state == RunUi.Running)">
         @foreach (var r in _repositories)
         {
             <MudSelectItem T="Guid?" Value="@((Guid?)r.Id)">@r.Name (@r.DefaultBranch)</MudSelectItem>
@@ -22,7 +22,7 @@
     </MudSelect>
     <MudSelect T="Guid?" Value="_selectedId" ValueChanged="OnPipelineSelectedAsync"
                Label="Pipeline" Dense="true" Variant="Variant.Outlined"
-               Style="min-width: 16rem;" Disabled="@(_snapshot.State == PipelineState.Running)">
+               Style="min-width: 16rem;" Disabled="@(_state == RunUi.Running)">
         @foreach (var p in _pipelines)
         {
             <MudSelectItem T="Guid?" Value="@((Guid?)p.Id)">@p.Name (@p.StageCount)</MudSelectItem>
@@ -31,34 +31,22 @@
     <MudTooltip Text="Manage pipelines">
         <MudIconButton Icon="@Icons.Material.Filled.Edit" Href="/ci/pipelines" />
     </MudTooltip>
-    @if (_snapshot.State == PipelineState.Running)
-    {
-        <MudButton Color="Color.Error"
-                   Variant="Variant.Filled"
-                   StartIcon="@Icons.Material.Filled.Stop"
-                   OnClick="OnCancel">
-            Cancel
-        </MudButton>
-    }
-    else
-    {
-        <MudButton Color="Color.Primary"
-                   Variant="Variant.Filled"
-                   StartIcon="@Icons.Material.Filled.PlayArrow"
-                   Disabled="@(_steps.Count == 0)"
-                   OnClick="OnRun">
-            Run Pipeline
-        </MudButton>
-    }
+    <MudTooltip Text="Run history">
+        <MudIconButton Icon="@Icons.Material.Filled.History" Href="/jenkins/runs" />
+    </MudTooltip>
+    <MudButton Color="Color.Primary" Variant="Variant.Filled"
+               StartIcon="@Icons.Material.Filled.PlayArrow"
+               Disabled="@(_selectedId is null || _state == RunUi.Running)"
+               OnClick="OnRun">
+        Run Pipeline
+    </MudButton>
 </MudStack>
 
-@if (_snapshot.State is PipelineState.Completed or PipelineState.Failed && _snapshot.Result is { } result)
+@if (_state is RunUi.Succeeded or RunUi.Failed)
 {
-    <MudAlert Severity="@(result.Success ? Severity.Success : Severity.Error)"
-              Variant="Variant.Filled"
-              Class="mb-4">
-        Pipeline @(result.Success ? "succeeded" : "failed")
-        @if (!result.Success && result.FailureReason is { Length: > 0 } reason)
+    <MudAlert Severity="@(_state == RunUi.Succeeded ? Severity.Success : Severity.Error)" Variant="Variant.Filled" Class="mb-4">
+        Pipeline @(_state == RunUi.Succeeded ? "succeeded" : "failed")
+        @if (_state == RunUi.Failed && _failureReason is { Length: > 0 } reason)
         {
             <span> — @reason</span>
         }
@@ -71,45 +59,26 @@
     {
         <MudText Typo="Typo.body2" Class="mb-2" Style="color: var(--mud-palette-text-secondary);">
             Source steps clone <strong>@repo.GitUrl</strong> @@ <strong>@repo.DefaultBranch</strong>
-            (injected as <code>GIT_URL</code> / <code>GIT_BRANCH</code>).
+            (injected server-side as <code>GIT_URL</code> / <code>GIT_BRANCH</code>).
         </MudText>
-    }
-    else
-    {
-        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mb-2">
-            No repository selected — the build step has no <code>GIT_URL</code> and will fail unless a stage sets it explicitly.
-        </MudAlert>
     }
     <MudSimpleTable Dense="true" Hover="true" Striped="true" Style="font-family: ui-monospace, monospace;">
         <thead>
-            <tr>
-                <th style="width: 2rem;"></th>
-                <th>Job</th>
-                <th style="width: 6rem;">Build</th>
-                <th>Status</th>
-                <th style="width: 6rem;">Duration</th>
-            </tr>
+            <tr><th style="width: 2rem;"></th><th>Job</th><th style="width: 6rem;">Build</th><th>Status</th></tr>
         </thead>
         <tbody>
-            @if (_steps.Count == 0)
+            @if (_plannedJobs.Count == 0)
             {
-                <tr><td colspan="5" style="color: var(--mud-palette-text-secondary);">No pipeline selected, or it has no stages.</td></tr>
+                <tr><td colspan="4" style="color: var(--mud-palette-text-secondary);">No pipeline selected, or it has no stages.</td></tr>
             }
-            @foreach (var step in _steps)
+            @foreach (var job in _plannedJobs)
             {
-                var view = StepStatusFor(step.JobName);
+                var view = StepFor(job);
                 <tr>
-                    <td>
-                        <MudIcon Icon="@view.Icon"
-                                 Color="@view.IconColor"
-                                 Size="Size.Small" />
-                    </td>
-                    <td>@step.JobName</td>
+                    <td><MudIcon Icon="@view.Icon" Color="@view.IconColor" Size="Size.Small" /></td>
+                    <td>@job</td>
                     <td>@(view.BuildNumber is int n ? $"#{n}" : "-")</td>
-                    <td>
-                        <MudText Color="@view.IconColor" Typo="Typo.body2">@view.Status</MudText>
-                    </td>
-                    <td>@(view.Duration is TimeSpan d ? $"{d.TotalSeconds:F1}s" : "-")</td>
+                    <td><MudText Color="@view.IconColor" Typo="Typo.body2">@view.Status</MudText></td>
                 </tr>
             }
         </tbody>
@@ -119,15 +88,15 @@
 <MudPaper Elevation="1" Class="pa-4 mb-4">
     <MudText Typo="Typo.h6" Class="mb-2">
         Console
-        @if (_snapshot.CurrentStepJob is { Length: > 0 } job)
+        @if (_currentJob is { Length: > 0 } job)
         {
             <MudText Typo="Typo.body2" Class="d-inline ml-2" Style="color: var(--mud-palette-text-secondary);">— @job</MudText>
         }
     </MudText>
     <div class="console-log">
-        @if (CurrentLog() is { Length: > 0 } logHtml)
+        @if (CurrentConsole() is { Length: > 0 } html)
         {
-            @((MarkupString)logHtml)
+            @((MarkupString)html)
         }
         else
         {
@@ -139,47 +108,43 @@
 <MudPaper Elevation="1" Class="pa-4">
     <MudText Typo="Typo.h6" Class="mb-2">Events</MudText>
     <div class="events-log">
-        @if (_snapshot.Events.Count == 0)
+        @if (_events.Count == 0)
         {
             <div class="empty">No events yet — click <em>Run Pipeline</em>.</div>
         }
         else
         {
-            @foreach (var evt in _snapshot.Events)
+            @foreach (var line in _events)
             {
-                <div class="event event-@EventKind(evt)">
-                    <span class="ts">[@evt.Timestamp.ToString("HH:mm:ss")]</span>
-                    <span class="job">@evt.JobName</span>
-                    <span class="text">@EventText(evt)</span>
-                </div>
+                <div class="event event-info"><span class="text">@line</span></div>
             }
         }
     </div>
 </MudPaper>
 
 @code {
-    // Steps are loaded from the selected persisted pipeline (Jenkins.Api). Falls back to
-    // the built-in CICD Main if the service is unreachable so the page still runs.
-    private IReadOnlyList<PipelineStep> _steps = Array.Empty<PipelineStep>();
     private IReadOnlyList<PipelineSummaryDto> _pipelines = Array.Empty<PipelineSummaryDto>();
     private Guid? _selectedId;
+    private IReadOnlyList<string> _plannedJobs = Array.Empty<string>();
 
-    // The repo whose GitUrl/DefaultBranch are injected into the source (no-upstream) steps.
     private IReadOnlyList<RepositoryDto> _repositories = Array.Empty<RepositoryDto>();
     private Guid? _selectedRepoId;
     private RepositoryDto? SelectedRepo => _repositories.FirstOrDefault(r => r.Id == _selectedRepoId);
 
-    private PipelineSnapshot _snapshot = new(
-    PipelineState.Idle,
-    Array.Empty<PipelineEvent>(),
-    CurrentStepJob: null,
-    Logs: new Dictionary<string, string>(),
-    Result: null);
+    private enum RunUi { Idle, Running, Succeeded, Failed }
+    private RunUi _state = RunUi.Idle;
+    private Guid? _runId;
+    private string? _failureReason;
+    private HubConnection? _hub;
+
+    private sealed class StepLive { public string Status = "pending"; public int? BuildNumber; public string? Reason; }
+    private readonly Dictionary<string, StepLive> _live = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, StringBuilder> _console = new(StringComparer.OrdinalIgnoreCase);
+    private string? _currentJob;
+    private readonly List<string> _events = new();
 
     protected override async Task OnInitializedAsync()
     {
-        _snapshot = Runner.Snapshot;
-        Runner.StateChanged += OnStateChanged;
         await LoadRepositoriesAsync();
         await LoadPipelinesAsync();
     }
@@ -191,146 +156,144 @@
         _selectedRepoId = _repositories.FirstOrDefault()?.Id;
     }
 
-    private void OnRepoSelected(Guid? id)
-    {
-        _selectedRepoId = id;
-        StateHasChanged();
-    }
+    private void OnRepoSelected(Guid? id) { _selectedRepoId = id; StateHasChanged(); }
 
     private async Task LoadPipelinesAsync()
     {
-        try
-        {
-            _pipelines = await Api.ListPipelinesAsync();
-        }
-        catch
-        {
-            _pipelines = Array.Empty<PipelineSummaryDto>();
-        }
-
-        // Prefer the first active pipeline, else the first one.
+        try { _pipelines = await Api.ListPipelinesAsync(); }
+        catch { _pipelines = Array.Empty<PipelineSummaryDto>(); }
         var initial = _pipelines.FirstOrDefault(p => p.IsActive) ?? _pipelines.FirstOrDefault();
-        if (initial is not null)
-        {
-            await OnPipelineSelectedAsync(initial.Id);
-        }
-        else
-        {
-            // No persisted pipelines reachable — fall back to the built-in default.
-            _steps = DefaultPipelines.CicdMain();
-        }
+        if (initial is not null) await OnPipelineSelectedAsync(initial.Id);
     }
 
     private async Task OnPipelineSelectedAsync(Guid? id)
     {
         _selectedId = id;
-        if (id is not { } pid) { _steps = Array.Empty<PipelineStep>(); return; }
+        if (id is not { } pid) { _plannedJobs = Array.Empty<string>(); return; }
         try
         {
             var dto = await Api.GetPipelineAsync(pid);
-            _steps = dto is null
-                ? Array.Empty<PipelineStep>()
-                : dto.Stages
-                     .Select(s => new PipelineStep(
-                         s.JobName,
-                         string.IsNullOrWhiteSpace(s.UpstreamJobName) ? null : s.UpstreamJobName,
-                         s.Parameters.Count > 0 ? new Dictionary<string, string>(s.Parameters) : null))
-                     .ToList();
+            _plannedJobs = dto?.Stages.Select(s => s.JobName).ToList() ?? new List<string>();
         }
-        catch
-        {
-            _steps = DefaultPipelines.CicdMain();
-        }
+        catch { _plannedJobs = Array.Empty<string>(); }
         StateHasChanged();
     }
 
-    private void OnStateChanged()
+    private async Task OnRun()
     {
-        _ = InvokeAsync(() =>
+        if (_selectedId is not { } pid) return;
+        _live.Clear(); _console.Clear(); _events.Clear();
+        _currentJob = null; _failureReason = null;
+        _state = RunUi.Running;
+        StateHasChanged();
+        try
         {
-            _snapshot = Runner.Snapshot;
-            StateHasChanged();
-        });
-    }
-
-    private void OnRun()    => Runner.TryStart(EffectiveSteps());
-    private void OnCancel() => Runner.Cancel();
-
-    // Inject the selected repo's GitUrl/DefaultBranch into the source steps (those with
-    // no upstream job — the build steps that clone). Downstream steps consume artifacts
-    // via copyArtifacts and don't need GIT_URL. Explicit stage params take precedence.
-    private IReadOnlyList<PipelineStep> EffectiveSteps()
-    {
-        if (SelectedRepo is not { } repo) return _steps;
-        return _steps.Select(s =>
-        {
-            if (!string.IsNullOrWhiteSpace(s.UpstreamJob)) return s;
-            var merged = new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["GIT_URL"] = repo.GitUrl,
-                ["GIT_BRANCH"] = repo.DefaultBranch,
-            };
-            if (s.AdditionalParameters is { Count: > 0 } extras)
-                foreach (var kv in extras) merged[kv.Key] = kv.Value;
-            return s with { AdditionalParameters = merged };
-        }).ToList();
-    }
-
-    private string? CurrentLog()
-    {
-        if (_snapshot.CurrentStepJob is not { Length: > 0 } job) return null;
-        return _snapshot.Logs.TryGetValue(job, out var html) ? html : null;
-    }
-
-    public void Dispose() => Runner.StateChanged -= OnStateChanged;
-
-    private Color StateChipColor() => _snapshot.State switch
-    {
-        PipelineState.Running   => Color.Info,
-        PipelineState.Completed => Color.Success,
-        PipelineState.Failed    => Color.Error,
-        _                       => Color.Default
-    };
-
-    private sealed record StepView(string Icon, Color IconColor, string Status, int? BuildNumber, TimeSpan? Duration);
-
-    private StepView StepStatusFor(string jobName)
-    {
-        PipelineEvent? latest = null;
-        for (var i = _snapshot.Events.Count - 1; i >= 0; i--)
-        {
-            if (string.Equals(_snapshot.Events[i].JobName, jobName, StringComparison.OrdinalIgnoreCase))
-            {
-                latest = _snapshot.Events[i];
-                break;
-            }
+            _runId = await Api.StartPipelineRunAsync(pid, new StartPipelineRunRequest(_selectedRepoId, "web-admin"));
+            await ConnectAsync(_runId.Value);
         }
-
-        return latest switch
+        catch (Exception ex)
         {
-            PipelineStepCompleted c => new(Icons.Material.Filled.CheckCircle,    Color.Success, $"{c.Result}", c.BuildNumber, c.Duration),
-            PipelineStepFailed f    => new(Icons.Material.Filled.Cancel,         Color.Error,   $"failed: {f.Reason}", null, null),
-            PipelineStepRunning r   => new(Icons.Material.Filled.PlayCircle,     Color.Info,    "running", r.BuildNumber, null),
-            PipelineStepQueued q    => new(Icons.Material.Filled.Schedule,       Color.Info,    $"queued ({q.QueueId})", null, null),
-            PipelineStepStarted s   => new(Icons.Material.Filled.HourglassTop,   Color.Info,    "starting", null, null),
-            _                       => new(Icons.Material.Filled.RadioButtonUnchecked, Color.Default, "pending", null, null)
+            _state = RunUi.Failed; _failureReason = ex.Message; StateHasChanged();
+        }
+    }
+
+    private async Task ConnectAsync(Guid runId)
+    {
+        await DisposeHubAsync();
+        var url = new Uri(Api.BaseAddress, "hubs/pipeline-runs");
+        _hub = new HubConnectionBuilder().WithUrl(url).WithAutomaticReconnect().Build();
+
+        _hub.On<PipelineRunDto>("RunSnapshot", dto => InvokeAsync(() => { ApplySnapshot(dto); StateHasChanged(); }));
+        _hub.On<StepChangedMsg>("StepChanged", m => InvokeAsync(() => { ApplyStep(m); StateHasChanged(); }));
+        _hub.On<ConsoleMsg>("ConsoleAppended", m => InvokeAsync(() => { ApplyConsole(m); StateHasChanged(); }));
+        _hub.On<SettledMsg>("RunSettled", m => InvokeAsync(() => { ApplySettled(m); StateHasChanged(); }));
+
+        await _hub.StartAsync();
+        await _hub.SendAsync("Subscribe", runId);
+    }
+
+    private void ApplySnapshot(PipelineRunDto dto)
+    {
+        _state = dto.Status switch
+        {
+            PipelineRunStatusDto.Running => RunUi.Running,
+            PipelineRunStatusDto.Succeeded => RunUi.Succeeded,
+            _ => RunUi.Failed
+        };
+        _failureReason = dto.FailureReason;
+        foreach (var s in dto.Steps)
+            _live[s.JobName] = new StepLive { Status = s.Result, BuildNumber = s.BuildNumber };
+    }
+
+    private void ApplyStep(StepChangedMsg m)
+    {
+        var live = _live.TryGetValue(m.JobName, out var e) ? e : (_live[m.JobName] = new StepLive());
+        live.Status = m.Status;
+        if (m.BuildNumber is { } bn) live.BuildNumber = bn;
+        live.Reason = m.Reason;
+        if (m.Status is "Started" or "Running" or "Queued") _currentJob = m.JobName;
+        AddEvent($"{m.JobName}: {m.Status}{(m.Reason is { Length: > 0 } r ? " — " + r : "")}");
+    }
+
+    private void ApplyConsole(ConsoleMsg m)
+    {
+        var sb = _console.TryGetValue(m.JobName, out var b) ? b : (_console[m.JobName] = new StringBuilder());
+        sb.Append(m.Text);
+        _currentJob ??= m.JobName;
+    }
+
+    private void ApplySettled(SettledMsg m)
+    {
+        _state = m.Status switch { "Succeeded" => RunUi.Succeeded, "Running" => RunUi.Running, _ => RunUi.Failed };
+        _failureReason = m.FailureReason;
+        AddEvent($"run {m.Status}{(m.FailureReason is { Length: > 0 } r ? " — " + r : "")}");
+    }
+
+    private void AddEvent(string text)
+    {
+        _events.Add($"[{DateTime.Now:HH:mm:ss}] {text}");
+        if (_events.Count > 200) _events.RemoveAt(0);
+    }
+
+    private string? CurrentConsole()
+        => _currentJob is { } j && _console.TryGetValue(j, out var sb) ? sb.ToString() : null;
+
+    private StepView StepFor(string job)
+    {
+        if (!_live.TryGetValue(job, out var s))
+            return new StepView(Icons.Material.Filled.RadioButtonUnchecked, Color.Default, "pending", null);
+        return s.Status switch
+        {
+            "Success" or "Succeeded" => new(Icons.Material.Filled.CheckCircle, Color.Success, "succeeded", s.BuildNumber),
+            "Failure" or "Failed"    => new(Icons.Material.Filled.Cancel, Color.Error, s.Reason is { Length: > 0 } r ? $"failed: {r}" : "failed", s.BuildNumber),
+            "Running"                => new(Icons.Material.Filled.PlayCircle, Color.Info, "running", s.BuildNumber),
+            "Queued"                 => new(Icons.Material.Filled.Schedule, Color.Info, "queued", s.BuildNumber),
+            "Started"                => new(Icons.Material.Filled.HourglassTop, Color.Info, "starting", s.BuildNumber),
+            _                        => new(Icons.Material.Filled.RadioButtonUnchecked, Color.Default, s.Status, s.BuildNumber)
         };
     }
 
-    private static string EventKind(PipelineEvent evt) => evt switch
+    private Color StateChipColor() => _state switch
     {
-        PipelineStepCompleted => "success",
-        PipelineStepFailed    => "failure",
-        _                     => "info"
+        RunUi.Running => Color.Info,
+        RunUi.Succeeded => Color.Success,
+        RunUi.Failed => Color.Error,
+        _ => Color.Default
     };
 
-    private static string EventText(PipelineEvent evt) => evt switch
+    public async ValueTask DisposeAsync() => await DisposeHubAsync();
+
+    private async Task DisposeHubAsync()
     {
-        PipelineStepStarted s   => s.UpstreamBuildNumber is int n ? $"started (consuming upstream build #{n})" : "started",
-        PipelineStepQueued q    => $"queued (queue item {q.QueueId})",
-        PipelineStepRunning r   => $"running as build #{r.BuildNumber}",
-        PipelineStepCompleted c => $"completed #{c.BuildNumber} {c.Result} in {c.Duration.TotalSeconds:F1}s",
-        PipelineStepFailed f    => $"FAILED — {f.Reason}",
-        _                       => evt.GetType().Name
-    };
+        if (_hub is not null)
+        {
+            try { await _hub.DisposeAsync(); } catch { /* connection teardown */ }
+            _hub = null;
+        }
+    }
+
+    private sealed record StepView(string Icon, Color IconColor, string Status, int? BuildNumber);
+    private sealed record StepChangedMsg(Guid RunId, string JobName, string Status, int? BuildNumber, string? Reason);
+    private sealed record ConsoleMsg(Guid RunId, string JobName, int BuildNumber, string Text);
+    private sealed record SettledMsg(Guid RunId, string Status, string? FailureReason);
 }

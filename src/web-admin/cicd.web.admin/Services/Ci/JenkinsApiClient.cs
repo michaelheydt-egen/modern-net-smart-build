@@ -4,6 +4,7 @@ using System.Text.Json;
 using Jenkins.Contracts.Builds;
 using Jenkins.Contracts.Handoffs;
 using Jenkins.Contracts.Pipelines;
+using Jenkins.Contracts.PipelineRuns;
 using Jenkins.Contracts.Repositories;
 
 namespace Cicd.Web.Admin.Services.Ci;
@@ -26,6 +27,9 @@ public sealed class JenkinsApiClient
     {
         _http = http;
     }
+
+    /// <summary>The Jenkins.Api base address (used to build the SignalR hub URL).</summary>
+    public Uri BaseAddress => _http.BaseAddress!;
 
     // ---- Repositories ----
 
@@ -139,6 +143,33 @@ public sealed class JenkinsApiClient
 
     public Task<PipelineDto> ReorderStagesAsync(Guid id, ReorderStagesRequest body, CancellationToken ct = default)
         => PostJsonAsync<ReorderStagesRequest, PipelineDto>($"api/jenkins/pipelines/{id}/stages/reorder", body, ct);
+
+    // ---- Pipeline runs ----
+
+    public async Task<Guid> StartPipelineRunAsync(Guid pipelineId, StartPipelineRunRequest body, CancellationToken ct = default)
+    {
+        using var resp = await _http.PostAsJsonAsync($"api/jenkins/pipelines/{pipelineId}/runs", body, Json, ct).ConfigureAwait(false);
+        await EnsureOkAsync(resp, ct).ConfigureAwait(false);
+        var doc = await resp.Content.ReadFromJsonAsync<StartRunResponse>(Json, ct).ConfigureAwait(false);
+        return doc?.Id ?? throw new JenkinsApiException(resp.StatusCode, "Empty run id from start.");
+    }
+
+    public async Task<IReadOnlyList<PipelineRunSummaryDto>> ListPipelineRunsAsync(Guid? pipelineId = null, int take = 50, CancellationToken ct = default)
+    {
+        var url = $"api/jenkins/pipeline-runs?take={take}" + (pipelineId is { } pid ? $"&pipelineId={pid}" : "");
+        var list = await _http.GetFromJsonAsync<List<PipelineRunSummaryDto>>(url, Json, ct).ConfigureAwait(false);
+        return list ?? new List<PipelineRunSummaryDto>();
+    }
+
+    public async Task<PipelineRunDto?> GetPipelineRunAsync(Guid id, CancellationToken ct = default)
+    {
+        var resp = await _http.GetAsync($"api/jenkins/pipeline-runs/{id}", ct).ConfigureAwait(false);
+        if (resp.StatusCode == HttpStatusCode.NotFound) return null;
+        resp.EnsureSuccessStatusCode();
+        return await resp.Content.ReadFromJsonAsync<PipelineRunDto>(Json, ct).ConfigureAwait(false);
+    }
+
+    private sealed record StartRunResponse(Guid Id);
 
     // ---- Plumbing ----
 

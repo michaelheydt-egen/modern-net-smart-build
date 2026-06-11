@@ -1,0 +1,71 @@
+@page "/jenkins/runs"
+@inject JenkinsApiClient Api
+@inject NavigationManager Nav
+
+<PageTitle>Pipeline Runs</PageTitle>
+
+<MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4">
+    <MudText Typo="Typo.h4">Pipeline Runs</MudText>
+    <MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-secondary);">server-side run history</MudText>
+    <MudSpacer />
+    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" OnClick="LoadAsync" Disabled="_loading">Refresh</MudButton>
+    <MudButton Href="/jenkins/orchestrator" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.PlayArrow">Orchestrator</MudButton>
+</MudStack>
+
+<MudPaper Elevation="1" Class="pa-4">
+    @if (_loading && _runs is null)
+    {
+        <MudProgressLinear Indeterminate="true" />
+    }
+    else if (_runs is { Count: 0 })
+    {
+        <MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-secondary);">No runs yet. Start one from the Orchestrator.</MudText>
+    }
+    else if (_runs is not null)
+    {
+        <MudTable Items="@_runs" Dense="true" Hover="true" Striped="true" T="PipelineRunSummaryDto">
+            <HeaderContent>
+                <MudTh>Pipeline</MudTh>
+                <MudTh Style="width: 7rem;">Status</MudTh>
+                <MudTh Style="width: 6rem;">Steps</MudTh>
+                <MudTh Style="width: 12rem;">Started</MudTh>
+                <MudTh Style="width: 8rem;">Duration</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>@context.PipelineName</MudTd>
+                <MudTd>
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="@StatusColor(context.Status)">@context.Status</MudChip>
+                </MudTd>
+                <MudTd>@context.StepCount</MudTd>
+                <MudTd>@context.StartedAtUtc.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss")</MudTd>
+                <MudTd>@Duration(context)</MudTd>
+            </RowTemplate>
+        </MudTable>
+    }
+</MudPaper>
+
+@code {
+    private IReadOnlyList<PipelineRunSummaryDto>? _runs;
+    private bool _loading;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true; StateHasChanged();
+        try { _runs = await Api.ListPipelineRunsAsync(); }
+        catch { _runs = Array.Empty<PipelineRunSummaryDto>(); }
+        finally { _loading = false; StateHasChanged(); }
+    }
+
+    private static Color StatusColor(PipelineRunStatusDto s) => s switch
+    {
+        PipelineRunStatusDto.Running => Color.Info,
+        PipelineRunStatusDto.Succeeded => Color.Success,
+        PipelineRunStatusDto.Failed => Color.Error,
+        _ => Color.Default
+    };
+
+    private static string Duration(PipelineRunSummaryDto r)
+        => r.CompletedAtUtc is { } done ? $"{(done - r.StartedAtUtc).TotalSeconds:F0}s" : "—";
+}
