@@ -14,6 +14,7 @@
          types are referenced only in Infrastructure. -->
     <ProjectReference Include="..\Jenkins.Domain\Jenkins.Domain.csproj" />
     <ProjectReference Include="..\Jenkins.Contracts\Jenkins.Contracts.csproj" />
+    <ProjectReference Include="..\..\shared\Cicd.IntegrationEvents\Cicd.IntegrationEvents.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -9,6 +9,4 @@ public sealed record DeploymentSucceeded(
     DateTimeOffset OccurredAtUtc,
     Guid DeploymentId,
     Guid ReleaseId,
-    Guid DeployableUnitId,
-    string Environment,
-    string Version) : IIntegrationEvent;
+    Guid EnvironmentId) : IIntegrationEvent;
