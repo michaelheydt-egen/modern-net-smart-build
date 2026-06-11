@@ -38,3 +38,21 @@ public sealed class PipelineRunSucceededTranslator
             TriggeredBy: evt.TriggeredBy,
             Steps: evt.Steps.Select(s => new Cicd.IntegrationEvents.Ci.PipelineCompletedStep(s.JobName, s.BuildNumber)).ToList());
 }
+
+/// <summary>
+/// Translation edge (CI → bus): a cancelled pipeline run → the cross-service
+/// <see cref="Cicd.IntegrationEvents.Ci.PipelineCancelled"/> integration event.
+/// </summary>
+public sealed class PipelineRunCancelledTranslator
+{
+    public Cicd.IntegrationEvents.Ci.PipelineCancelled Handle(PipelineRunCancelled evt)
+        => new(
+            EventId: Guid.NewGuid(),
+            OccurredAtUtc: evt.OccurredAtUtc,
+            RunId: evt.RunId,
+            PipelineId: evt.PipelineId,
+            PipelineName: evt.PipelineName,
+            RepositoryId: evt.RepositoryId,
+            TriggeredBy: evt.TriggeredBy,
+            CompletedSteps: evt.Steps.Select(s => new Cicd.IntegrationEvents.Ci.PipelineCompletedStep(s.JobName, s.BuildNumber)).ToList());
+}

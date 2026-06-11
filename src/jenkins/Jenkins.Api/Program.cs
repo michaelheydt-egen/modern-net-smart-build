@@ -63,6 +63,9 @@ builder.Host.UseWolverine(opts =>
     // container-published facts; it subscribes to deployment outcomes.
     opts.AddCicdMessaging(builder.Configuration, topology => topology
         .Publish<Cicd.IntegrationEvents.Ci.ContainerPublished>("ci.events")
+        .Publish<Cicd.IntegrationEvents.Ci.PipelineStepCompleted>("ci.events")
+        .Publish<Cicd.IntegrationEvents.Ci.PipelineCompleted>("ci.events")
+        .Publish<Cicd.IntegrationEvents.Ci.PipelineCancelled>("ci.events")
         .Subscribe("deployment.events", subscriber: "jenkins"));
 });
 

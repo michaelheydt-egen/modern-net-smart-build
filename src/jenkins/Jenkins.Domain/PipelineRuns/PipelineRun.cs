@@ -82,6 +82,6 @@ public sealed class PipelineRun : AggregateRoot<Guid>
         if (Status != PipelineRunStatus.Running) return;
         Status = PipelineRunStatus.Cancelled;
         CompletedAtUtc = occurredAtUtc;
-        RaiseEvent(new PipelineRunCancelled(Id, occurredAtUtc));
+        RaiseEvent(new PipelineRunCancelled(Id, PipelineId, PipelineName, RepositoryId, TriggeredBy, Steps, occurredAtUtc));
     }
 }

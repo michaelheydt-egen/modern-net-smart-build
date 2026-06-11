@@ -37,6 +37,13 @@ public sealed record PipelineRunFailed(
     string FailureReason,
     DateTimeOffset OccurredAtUtc) : IDomainEvent;
 
+/// <summary>The run was cancelled in flight — translated to the <c>Ci.PipelineCancelled</c>
+/// integration event. Carries the steps that completed before cancellation.</summary>
 public sealed record PipelineRunCancelled(
     Guid RunId,
+    Guid PipelineId,
+    string PipelineName,
+    Guid? RepositoryId,
+    string TriggeredBy,
+    IReadOnlyList<PipelineRunStepRecord> Steps,
     DateTimeOffset OccurredAtUtc) : IDomainEvent;
