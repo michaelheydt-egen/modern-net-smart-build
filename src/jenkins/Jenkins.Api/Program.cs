@@ -4,6 +4,7 @@ using Jenkins.Application;
 using Jenkins.Application.Features.Pipelines;
 using Jenkins.Infrastructure;
 using Jenkins.Infrastructure.Persistence;
+using Cicd.Messaging;
 using Microsoft.EntityFrameworkCore;
 using Wolverine;
 using Wolverine.EntityFrameworkCore;
@@ -49,6 +50,12 @@ builder.Host.UseWolverine(opts =>
     {
         opts.PersistMessagesWithSqlServer(connection);
     }
+
+    // Cross-service event bus (provider-pluggable; RabbitMQ by default). CI publishes
+    // container-published facts; it subscribes to deployment outcomes.
+    opts.AddCicdMessaging(builder.Configuration, topology => topology
+        .Publish<Cicd.IntegrationEvents.Ci.ContainerPublished>("ci.events")
+        .Subscribe("deployment.events", subscriber: "jenkins"));
 });
 
 var app = builder.Build();

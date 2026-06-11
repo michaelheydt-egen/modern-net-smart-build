@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Cicd.Messaging;
 using Deployment.Api.Endpoints;
 using Deployment.Application;
 using Deployment.Infrastructure;
@@ -52,6 +53,12 @@ builder.Host.UseWolverine(opts =>
     {
         opts.PersistMessagesWithSqlServer(connection);
     }
+
+    // Cross-service event bus (provider-pluggable; RabbitMQ by default). Deployment
+    // publishes deployment outcomes; it subscribes to CI container-published facts.
+    opts.AddCicdMessaging(builder.Configuration, topology => topology
+        .Publish<Cicd.IntegrationEvents.Deployment.DeploymentSucceeded>("deployment.events")
+        .Subscribe("ci.events", subscriber: "deployment"));
 });
 
 var app = builder.Build();

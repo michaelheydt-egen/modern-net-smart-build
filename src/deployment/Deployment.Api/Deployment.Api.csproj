@@ -10,6 +10,8 @@
     <ProjectReference Include="..\Deployment.Application\Deployment.Application.csproj" />
     <ProjectReference Include="..\Deployment.Infrastructure\Deployment.Infrastructure.csproj" />
     <ProjectReference Include="..\..\Aspire\Cicd.Aspire.ServiceDefaults\Cicd.Aspire.ServiceDefaults.csproj" />
+    <ProjectReference Include="..\..\shared\Cicd.Messaging\Cicd.Messaging.csproj" />
+    <ProjectReference Include="..\..\shared\Cicd.IntegrationEvents\Cicd.IntegrationEvents.csproj" />
   </ItemGroup>
 
   <ItemGroup>
