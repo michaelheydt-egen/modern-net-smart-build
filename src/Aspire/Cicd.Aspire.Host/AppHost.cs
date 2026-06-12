@@ -6,6 +6,20 @@ var builder = DistributedApplication.CreateBuilder(args);
 var jenkinsToken = builder.AddParameter("JenkinsApiToken", secret: true);
 var jenkinsUrl = builder.AddParameter("JenkinsUrl");
 
+// Nexus — required by the CI service's artifact-reconcile loop (JenkinsBuildSyncService):
+// it polls Nexus for each tracked build's pushed docker image and, on a match, raises
+// ContainerPublished — which is what populates the publisher inventory. The reconcile reader
+// is only registered when BOTH Url and Password are non-empty, so a blank password silently
+// disables auto-population. Override via the AppHost's user-secrets (defaults assume the
+// docker-network hostnames the build pipeline uses; use localhost:8081/8082 if Nexus's ports
+// are published to the host instead):
+//   dotnet user-secrets set Parameters:NexusUrl http://<nexus>:8081
+//   dotnet user-secrets set Parameters:NexusPassword <password>
+//   dotnet user-secrets set Parameters:NexusDockerHost <nexus>:8082
+var nexusUrl = builder.AddParameter("NexusUrl", builder.Configuration["Parameters:NexusUrl"] ?? "http://nexus:8081");
+var nexusPassword = builder.AddParameter("NexusPassword", builder.Configuration["Parameters:NexusPassword"] ?? "", secret: true);
+var nexusDockerHost = builder.AddParameter("NexusDockerHost", builder.Configuration["Parameters:NexusDockerHost"] ?? "nexus:8082");
+
 // SQL Server (container) + the deployment DB. The database resource name
 // "Deployment" becomes ConnectionStrings__Deployment on referencing services.
 //
@@ -44,7 +58,11 @@ var jenkins = builder.AddProject<Projects.Jenkins_Api>("jenkins-api")
     .WithEnvironment("Database__AutoMigrate", "true")
     .WithEnvironment("Deployment__ApiBaseUrl", deployment.GetEndpoint("http"))
     .WithEnvironment("Jenkins__ApiToken", jenkinsToken)
-    .WithEnvironment("Jenkins__Url", jenkinsUrl);
+    .WithEnvironment("Jenkins__Url", jenkinsUrl)
+    // Nexus reconcile (option b): populates the publisher inventory by detecting pushed images.
+    .WithEnvironment("Nexus__Url", nexusUrl)
+    .WithEnvironment("Nexus__Password", nexusPassword)
+    .WithEnvironment("Nexus__DockerRegistryHost", nexusDockerHost);
 
 // Publisher: moves containers from local Nexus to remote registries (GAR for now). Consumes the
 // CI ContainerPublished bus event to keep a local inventory; exposes an API to tag containers
@@ -66,6 +84,11 @@ builder.AddProject<Projects.cicd_web_admin>("web-admin")
     .WithEnvironment("JenkinsApi__BaseUrl", jenkins.GetEndpoint("http"))
     .WithEnvironment("PublisherApi__BaseUrl", publisher.GetEndpoint("http"))
     .WithEnvironment("Jenkins__ApiToken", jenkinsToken)
-    .WithEnvironment("Jenkins__Url", jenkinsUrl);
+    .WithEnvironment("Jenkins__Url", jenkinsUrl)
+    // Same Nexus config as jenkins-api — the admin UI browses the docker registry (Docker page,
+    // and the inventory "Add container" dialog builds pull refs from Nexus:DockerRegistryHost).
+    .WithEnvironment("Nexus__Url", nexusUrl)
+    .WithEnvironment("Nexus__Password", nexusPassword)
+    .WithEnvironment("Nexus__DockerRegistryHost", nexusDockerHost);
 
 builder.Build().Run();
