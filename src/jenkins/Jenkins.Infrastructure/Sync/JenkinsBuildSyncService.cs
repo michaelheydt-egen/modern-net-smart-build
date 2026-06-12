@@ -37,6 +37,8 @@ internal sealed class JenkinsBuildSyncService : BackgroundService
 
     private readonly HashSet<string> _backfilled = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<Guid> _reconciled = new(); // builds whose Nexus artifacts are attached
+    private readonly HashSet<Guid> _noArtifactsLogged = new(); // builds we've already warned about (avoid per-tick spam)
+    private bool _nexusDisabledLogged;
 
     public JenkinsBuildSyncService(
         IServiceScopeFactory scopes,
@@ -110,6 +112,13 @@ internal sealed class JenkinsBuildSyncService : BackgroundService
         var completeBuild = scope.ServiceProvider.GetRequiredService<CompleteBuildHandler>();
         var reconcile = scope.ServiceProvider.GetRequiredService<ReconcileBuildArtifactsHandler>();
         var nexus = scope.ServiceProvider.GetService<INexusArtifactReader>(); // null when Nexus unconfigured
+        if (nexus is null && !_nexusDisabledLogged)
+        {
+            _nexusDisabledLogged = true;
+            _logger.LogWarning(
+                "[reconcile] Nexus artifact reconciliation is DISABLED — Nexus:Url and/or Nexus:Password are not configured " +
+                "for the CI service. Pushed container images will NOT auto-populate the publisher inventory.");
+        }
 
         foreach (var build in recent)
         {
@@ -201,10 +210,26 @@ internal sealed class JenkinsBuildSyncService : BackgroundService
                     if (result.TotalArtifacts > 0)
                     {
                         _reconciled.Add(summary.Id);
+                        _noArtifactsLogged.Remove(summary.Id);
                         _logger.LogInformation("[reconcile] {Job}#{Number}: +{Added} artifact(s) ({Total} total)",
                             repo.CiJobName, build.Number, result.Added, result.TotalArtifacts);
                     }
                 }
+                else if (_noArtifactsLogged.Add(summary.Id))
+                {
+                    // Visible (once per build) so a tag/repo mismatch isn't silent. The reader searches
+                    // the docker repo for a component tagged with the commit-short (fallback ci-<build#>).
+                    _logger.LogInformation(
+                        "[reconcile] {Job}#{Number}: no Nexus artifacts found yet (version '{Version}', commit '{Commit}'). " +
+                        "Will retry each tick. Verify the image was pushed to Nexus tagged '{Commit}' or 'ci-{Number}'.",
+                        repo.CiJobName, build.Number, info.PackageVersion, commitShort, commitShort, build.Number);
+                }
+            }
+            catch (Exception ex) when (_noArtifactsLogged.Add(summary.Id))
+            {
+                _logger.LogWarning(ex,
+                    "[reconcile] {Job}#{Number}: Nexus query failed — is Nexus:Url reachable from this service and the password valid? Will retry.",
+                    repo.CiJobName, build.Number);
             }
             catch (Exception ex)
             {

@@ -19,6 +19,10 @@ var jenkinsUrl = builder.AddParameter("JenkinsUrl");
 var nexusUrl = builder.AddParameter("NexusUrl", builder.Configuration["Parameters:NexusUrl"] ?? "http://nexus:8081");
 var nexusPassword = builder.AddParameter("NexusPassword", builder.Configuration["Parameters:NexusPassword"] ?? "", secret: true);
 var nexusDockerHost = builder.AddParameter("NexusDockerHost", builder.Configuration["Parameters:NexusDockerHost"] ?? "nexus:8082");
+// The hosted docker repo the build pipeline pushes to (via the :8082 connector). This project's
+// Nexus names it "docker-private" — NOT the generic "docker-hosted" the options classes default
+// to, so the reconcile/UI must be pointed here or they search an empty repo.
+var nexusDockerRepo = builder.AddParameter("NexusDockerRepository", builder.Configuration["Parameters:NexusDockerRepository"] ?? "docker-private");
 
 // SQL Server (container) + the deployment DB. The database resource name
 // "Deployment" becomes ConnectionStrings__Deployment on referencing services.
@@ -62,7 +66,8 @@ var jenkins = builder.AddProject<Projects.Jenkins_Api>("jenkins-api")
     // Nexus reconcile (option b): populates the publisher inventory by detecting pushed images.
     .WithEnvironment("Nexus__Url", nexusUrl)
     .WithEnvironment("Nexus__Password", nexusPassword)
-    .WithEnvironment("Nexus__DockerRegistryHost", nexusDockerHost);
+    .WithEnvironment("Nexus__DockerRegistryHost", nexusDockerHost)
+    .WithEnvironment("Nexus__DockerRepository", nexusDockerRepo);
 
 // Publisher: moves containers from local Nexus to remote registries (GAR for now). Consumes the
 // CI ContainerPublished bus event to keep a local inventory; exposes an API to tag containers
@@ -87,8 +92,10 @@ builder.AddProject<Projects.cicd_web_admin>("web-admin")
     .WithEnvironment("Jenkins__Url", jenkinsUrl)
     // Same Nexus config as jenkins-api — the admin UI browses the docker registry (Docker page,
     // and the inventory "Add container" dialog builds pull refs from Nexus:DockerRegistryHost).
+    // NOTE: web-admin's NexusOptions key is DockerHostedRepository (jenkins uses DockerRepository).
     .WithEnvironment("Nexus__Url", nexusUrl)
     .WithEnvironment("Nexus__Password", nexusPassword)
-    .WithEnvironment("Nexus__DockerRegistryHost", nexusDockerHost);
+    .WithEnvironment("Nexus__DockerRegistryHost", nexusDockerHost)
+    .WithEnvironment("Nexus__DockerHostedRepository", nexusDockerRepo);
 
 builder.Build().Run();
