@@ -12,6 +12,11 @@
         containers recorded from local Nexus (via the CI ContainerPublished event, or added manually)
     </MudText>
     <MudSpacer />
+    @if (_selected.Count > 0)
+    {
+        <MudButton Variant="Variant.Filled" Color="Color.Error" StartIcon="@Icons.Material.Filled.DeleteSweep"
+                   OnClick="DeleteSelectedAsync" Disabled="_busy">Delete selected (@_selected.Count)</MudButton>
+    }
     <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="OpenAdd">Add container</MudButton>
     <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" OnClick="LoadAsync">Refresh</MudButton>
 </MudStack>
@@ -34,7 +39,8 @@
     }
     else if (_items is not null)
     {
-        <MudTable Items="@_items" Dense="true" Hover="true" Striped="true" T="PublishableContainerDto">
+        <MudTable Items="@_items" Dense="true" Hover="true" Striped="true" T="PublishableContainerDto"
+                  MultiSelection="true" @bind-SelectedItems="_selected">
             <HeaderContent>
                 <MudTh>Container</MudTh>
                 <MudTh Style="width: 11rem;">Version</MudTh>
@@ -75,6 +81,10 @@
                                        Icon="@(context.IsActive ? Icons.Material.Filled.ToggleOn : Icons.Material.Filled.ToggleOff)"
                                        Color="@(context.IsActive ? Color.Success : Color.Default)"
                                        OnClick="@(() => ToggleActiveAsync(context))" />
+                    </MudTooltip>
+                    <MudTooltip Text="Delete">
+                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                       OnClick="@(() => DeleteOneAsync(context))" />
                     </MudTooltip>
                 </MudTd>
             </RowTemplate>
@@ -224,6 +234,7 @@
     private IReadOnlyList<PublishableContainerDto>? _items;
     private IReadOnlyList<PublishChannelDto>? _channels;
     private IReadOnlyList<RemoteRegistryDto>? _registries;
+    private HashSet<PublishableContainerDto> _selected = new();
     private bool _loading, _busy;
     private string? _error;
 
@@ -251,7 +262,7 @@
 
     private async Task LoadAsync()
     {
-        _loading = true; _error = null; StateHasChanged();
+        _loading = true; _error = null; _selected = new(); StateHasChanged();
         try
         {
             _items = await Api.ListContainersAsync();
@@ -324,6 +335,40 @@
             await LoadAsync();
         }
         catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+
+    // ---- Delete ----
+
+    private async Task DeleteOneAsync(PublishableContainerDto c)
+    {
+        _busy = true;
+        try
+        {
+            await Api.DeleteContainerAsync(c.Id);
+            Snackbar.Add($"Deleted '{c.ContainerName} {c.Version}'.", Severity.Success);
+            await LoadAsync();
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        finally { _busy = false; }
+    }
+
+    private async Task DeleteSelectedAsync()
+    {
+        if (_selected.Count == 0) return;
+        _busy = true;
+        var targets = _selected.ToList();
+        var ok = 0;
+        try
+        {
+            foreach (var c in targets)
+            {
+                try { await Api.DeleteContainerAsync(c.Id); ok++; }
+                catch (Exception ex) { Snackbar.Add($"'{c.ContainerName}': {ex.Message}", Severity.Error); }
+            }
+            Snackbar.Add($"Deleted {ok} of {targets.Count} container(s).", ok == targets.Count ? Severity.Success : Severity.Warning);
+            await LoadAsync();
+        }
+        finally { _busy = false; }
     }
 
     // ---- Tag / promote ----

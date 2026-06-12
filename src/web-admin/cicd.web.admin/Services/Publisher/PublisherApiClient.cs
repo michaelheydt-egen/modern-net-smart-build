@@ -105,6 +105,9 @@ public sealed class PublisherApiClient
     public Task DeactivateContainerAsync(Guid id, CancellationToken ct = default)
         => PostAsync($"api/publisher/containers/{id}/deactivate", ct);
 
+    public Task DeleteContainerAsync(Guid id, CancellationToken ct = default)
+        => DeleteAsync($"api/publisher/containers/{id}", ct);
+
     // ---- Channels ----
 
     public async Task<IReadOnlyList<PublishChannelDto>> ListChannelsAsync(CancellationToken ct = default)

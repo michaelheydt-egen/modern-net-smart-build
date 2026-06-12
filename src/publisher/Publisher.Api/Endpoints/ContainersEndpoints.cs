@@ -62,6 +62,12 @@ public static class ContainersEndpoints
             return Results.NoContent();
         });
 
+        group.MapDelete("{id:guid}", async (Guid id, DeleteContainerHandler handler, CancellationToken ct) =>
+        {
+            var deleted = await handler.HandleAsync(new DeleteContainerCommand(id), ct);
+            return deleted ? Results.NoContent() : Results.NotFound();
+        });
+
         return app;
     }
 }
