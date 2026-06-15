@@ -7,9 +7,7 @@
     <!-- Wire-format DTOs for the API HTTP surfaces. The admin UI is a client of
          each API; the Application/Domain/Infrastructure projects are deliberately
          NOT referenced from here. -->
-    <ProjectReference Include="..\..\deployment\Deployment.Contracts\Deployment.Contracts.csproj" />
     <ProjectReference Include="..\..\jenkins\Jenkins.Contracts\Jenkins.Contracts.csproj" />
-    <ProjectReference Include="..\..\publisher\Publisher.Contracts\Publisher.Contracts.csproj" />
     <ProjectReference Include="..\..\Aspire\Cicd.Aspire.ServiceDefaults\Cicd.Aspire.ServiceDefaults.csproj" />
   </ItemGroup>
 

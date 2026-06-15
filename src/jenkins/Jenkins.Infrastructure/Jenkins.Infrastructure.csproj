@@ -11,9 +11,6 @@
     <ProjectReference Include="..\Jenkins.Application\Jenkins.Application.csproj" />
     <ProjectReference Include="..\Jenkins.Domain\Jenkins.Domain.csproj" />
     <ProjectReference Include="..\Jenkins.Contracts\Jenkins.Contracts.csproj" />
-    <!-- The cross-service edge: CI consumes the deployment service's wire DTOs to
-         call its Releases API. One-way; no reverse dependency. -->
-    <ProjectReference Include="..\..\deployment\Deployment.Contracts\Deployment.Contracts.csproj" />
     <!-- Existing Jenkins HTTP client, wrapped by the build-ingestion adapters. -->
     <ProjectReference Include="..\Jenkins.Client\Jenkins.Client.csproj" />
     <!-- Pipeline step-execution engine, reused server-side by the run executor. -->

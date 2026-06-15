@@ -1,7 +1,0 @@
-# Vertical-slice feature folders live here, one per use case:
-#   Releases/CreateRelease/      → CreateReleaseCommand.cs + Handler + Validator + Dto
-#   Deployments/StartDeployment/ → StartDeploymentCommand.cs + Handler + Validator + Dto
-#   etc.
-#
-# Section-7 open questions resolve into specific features below — leaving the
-# folder empty until those decisions land.
