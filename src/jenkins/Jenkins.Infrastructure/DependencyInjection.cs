@@ -67,12 +67,9 @@ public static class DependencyInjection
         services.AddScoped<IPipelineReader, EfPipelineReader>();
         services.AddScoped<IPipelineRunReader, EfPipelineRunReader>();
 
-        // The one-way handoff client. Base URL points at the deployment service.
-        var deploymentBaseUrl = configuration["Deployment:ApiBaseUrl"] ?? "http://localhost:9601";
-        services.AddHttpClient<IDeploymentReleaseClient, DeploymentReleaseClient>(client =>
-        {
-            client.BaseAddress = new Uri(deploymentBaseUrl);
-        });
+        // The CI→deployment release handoff. The deployment microservice has been removed, so this
+        // is an inert no-op (the auto-publish path still runs but hands off to nothing).
+        services.AddScoped<IDeploymentReleaseClient, NoOpDeploymentReleaseClient>();
 
         return services;
     }

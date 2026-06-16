@@ -8,23 +8,17 @@ var builder = DistributedApplication.CreateBuilder(args);
 var jenkinsToken = builder.AddParameter("JenkinsApiToken", secret: true);
 var jenkinsUrl = builder.AddParameter("JenkinsUrl");
 
-// Nexus — required by the CI service's artifact-reconcile loop (JenkinsBuildSyncService):
-// it polls Nexus for each tracked build's pushed docker image and, on a match, raises
-// ContainerPublished — which is what populates the publisher inventory. The reconcile reader
-// is only registered when BOTH Url and Password are non-empty, so a blank password silently
-// disables auto-population. Override via the AppHost's user-secrets (defaults assume the
-// docker-network hostnames the build pipeline uses; use localhost:8081/8082 if Nexus's ports
-// are published to the host instead):
+// Nexus — required by the CI service's artifact-reconcile loop (JenkinsBuildSyncService): it polls
+// Nexus for each tracked build's pushed docker image and attaches the publication. Also used by
+// the admin UI's Docker/NuGet pages. The reconcile reader is only registered when BOTH Url and
+// Password are non-empty. These must be EAGER (fixed value) — a lazy secret AddParameter that
+// Aspire can't auto-resolve becomes an interactive prompt that blocks the referencing resource in
+// a headless `dotnet run`; builder.Configuration does NOT surface the parameter user-secrets, so we
+// read them explicitly. Override via the AppHost's user-secrets:
 //   dotnet user-secrets set Parameters:NexusUrl http://<nexus>:8081
 //   dotnet user-secrets set Parameters:NexusPassword <password>
 //   dotnet user-secrets set Parameters:NexusDockerHost <nexus>:8082
-// Nexus parameters. These must be EAGER (fixed value) — a lazy `AddParameter(name, secret: true)`
-// that Aspire can't auto-resolve becomes a pending interactive prompt that blocks the referencing
-// resource (jenkins-api / web-admin) from starting in a headless `dotnet run`. But the AppHost's
-// `builder.Configuration` does NOT surface the parameter user-secrets, so we read them explicitly
-// from the user-secrets store and pass the values directly. Defaults are the docker-network names
-// + this project's hosted docker repo ("docker-private", NOT the generic "docker-hosted").
-var paramSecrets = new Microsoft.Extensions.Configuration.ConfigurationBuilder()
+var paramSecrets = new ConfigurationBuilder()
     .AddUserSecrets("7e3b1a2c-9d4f-4a6b-8c1e-2f5a9b0c3d4e")
     .Build();
 string NexusParam(string key, string fallback) =>
@@ -37,75 +31,70 @@ var nexusPassword = builder.AddParameter("NexusPassword", NexusParam("NexusPassw
 var nexusDockerHost = builder.AddParameter("NexusDockerHost", NexusParam("NexusDockerHost", "nexus:8082"));
 var nexusDockerRepo = builder.AddParameter("NexusDockerRepository", NexusParam("NexusDockerRepository", "docker-private"));
 
-// SQL Server (container) + the deployment DB. The database resource name
-// "Deployment" becomes ConnectionStrings__Deployment on referencing services.
-//
-// The sa password is an EXPLICIT, pinned parameter (Parameters:sql-password in
-// user-secrets) rather than Aspire's auto-generated one. SQL Server bakes the
-// password into the data volume on first init and never updates it, so an
-// auto-generated value that drifts leaves the volume's sa password mismatched
-// ("Login failed for user 'sa'"). Pinning it keeps the volume and the passed
-// password aligned across runs.
+// SQL Server (container) + the Jenkins CI database. The sa password is an EXPLICIT, pinned
+// parameter (Parameters:sql-password in user-secrets) rather than Aspire's auto-generated one —
+// SQL Server bakes it into the data volume on first init and never updates it, so a drifting
+// auto-generated value leaves the volume's sa password mismatched ("Login failed for user 'sa'").
 var sqlPassword = builder.AddParameter("sql-password", secret: true);
 var sql = builder.AddSqlServer("sql", password: sqlPassword).WithDataVolume();
-var deploymentDb = sql.AddDatabase("Deployment");
 var jenkinsDb = sql.AddDatabase("JenkinsCi");
-var publisherDb = sql.AddDatabase("Publisher");
+var deploymentDb = sql.AddDatabase("Deployment");
 
-// RabbitMQ broker for the cross-service event bus. Ephemeral (no data volume) — Wolverine's
-// per-service SQL outbox/inbox provides durability, so the broker itself is disposable. The
-// resource name "messaging" surfaces as ConnectionStrings__messaging on referencing services
-// (consumed by Cicd.Messaging's provider switch).
+// RabbitMQ broker for the CI service's outbox/event publishing. Ephemeral (no data volume) —
+// Wolverine's per-service SQL outbox provides durability, so the broker itself is disposable.
 var rabbit = builder.AddRabbitMQ("messaging").WithManagementPlugin();
+
+var jenkins = builder.AddProject<Projects.Jenkins_Api>("jenkins-api")
+    .WithReference(jenkinsDb)
+    .WaitFor(sql)
+    .WithReference(rabbit)
+    .WaitFor(rabbit)
+    .WithEnvironment("Database__AutoMigrate", "true")
+    .WithEnvironment("Jenkins__ApiToken", jenkinsToken)
+    .WithEnvironment("Jenkins__Url", jenkinsUrl)
+    // Nexus reconcile (option b): attaches each build's pushed docker image as a publication.
+    .WithEnvironment("Nexus__Url", nexusUrl)
+    .WithEnvironment("Nexus__Password", nexusPassword)
+    .WithEnvironment("Nexus__DockerRegistryHost", nexusDockerHost)
+    .WithEnvironment("Nexus__DockerRepository", nexusDockerRepo);
+
+// Deployment: maps services↔environments↔containers and runs deployments (promote Nexus→GAR,
+// then create/update Cloud Run). Consumes the CI ContainerPublished event for auto-deploy. GCP
+// auth is ambient ADC (gcloud / GOOGLE_APPLICATION_CREDENTIALS); crane must reach Nexus + GAR.
+// GarPush shells out to go-containerregistry `crane` (NOT the similarly-named michaelsauter/crane
+// that ships on chocolatey's PATH). Point this at the real crane.exe; defaults to "crane" on PATH.
+// Override via the AppHost's user-secrets:
+//   dotnet user-secrets set Parameters:CraneExecutable <path-to-go-containerregistry-crane.exe>
+var craneExecutable = NexusParam("CraneExecutable", "crane");
+
+// crane reads registry auth from $DOCKER_CONFIG/config.json. The host's default ~/.docker config
+// uses Docker Desktop's locked "desktop" credsStore (crane can't write it), so we hand crane an
+// isolated, inline-auth config dir pre-seeded via `crane auth login` for Nexus (and later the GAR
+// gcloud credHelper). Empty => crane uses its default. Override via the AppHost's user-secrets:
+//   dotnet user-secrets set Parameters:DockerConfigDir <dir-containing-config.json>
+var dockerConfigDir = NexusParam("DockerConfigDir", "");
 
 var deployment = builder.AddProject<Projects.Deployment_Api>("deployment-api")
     .WithReference(deploymentDb)
     .WaitFor(sql)
     .WithReference(rabbit)
     .WaitFor(rabbit)
-    .WithEnvironment("Database__AutoMigrate", "true");
-
-var jenkins = builder.AddProject<Projects.Jenkins_Api>("jenkins-api")
-    .WithReference(deployment)
-    .WaitFor(deployment)
-    .WithReference(jenkinsDb)
-    .WaitFor(sql)
-    .WithReference(rabbit)
-    .WaitFor(rabbit)
     .WithEnvironment("Database__AutoMigrate", "true")
-    .WithEnvironment("Deployment__ApiBaseUrl", deployment.GetEndpoint("http"))
-    .WithEnvironment("Jenkins__ApiToken", jenkinsToken)
-    .WithEnvironment("Jenkins__Url", jenkinsUrl)
-    // Nexus reconcile (option b): populates the publisher inventory by detecting pushed images.
-    .WithEnvironment("Nexus__Url", nexusUrl)
-    .WithEnvironment("Nexus__Password", nexusPassword)
-    .WithEnvironment("Nexus__DockerRegistryHost", nexusDockerHost)
-    .WithEnvironment("Nexus__DockerRepository", nexusDockerRepo);
+    .WithEnvironment("Deployment__GoogleCloudRun__CraneExecutable", craneExecutable);
 
-// Publisher: moves containers from local Nexus to remote registries (GAR for now). Consumes the
-// CI ContainerPublished bus event to keep a local inventory; exposes an API to tag containers
-// publishable under a stable channel name.
-var publisher = builder.AddProject<Projects.Publisher_Api>("publisher-api")
-    .WithReference(publisherDb)
-    .WaitFor(sql)
-    .WithReference(rabbit)
-    .WaitFor(rabbit)
-    .WithEnvironment("Database__AutoMigrate", "true");
+if (dockerConfigDir.Length > 0)
+    deployment = deployment.WithEnvironment("DOCKER_CONFIG", dockerConfigDir);
 
 builder.AddProject<Projects.cicd_web_admin>("web-admin")
-    .WithReference(deployment)
     .WithReference(jenkins)
     .WaitFor(jenkins)
-    .WithReference(publisher)
-    .WaitFor(publisher)
-    .WithEnvironment("Deployment__Api__BaseUrl", deployment.GetEndpoint("http"))
+    .WithReference(deployment)
+    .WaitFor(deployment)
     .WithEnvironment("JenkinsApi__BaseUrl", jenkins.GetEndpoint("http"))
-    .WithEnvironment("PublisherApi__BaseUrl", publisher.GetEndpoint("http"))
+    .WithEnvironment("Deployment__Api__BaseUrl", deployment.GetEndpoint("http"))
     .WithEnvironment("Jenkins__ApiToken", jenkinsToken)
     .WithEnvironment("Jenkins__Url", jenkinsUrl)
-    // Same Nexus config as jenkins-api — the admin UI browses the docker registry (Docker page,
-    // and the inventory "Add container" dialog builds pull refs from Nexus:DockerRegistryHost).
-    // NOTE: web-admin's NexusOptions key is DockerHostedRepository (jenkins uses DockerRepository).
+    // Nexus config for the admin UI's Docker/NuGet pages.
     .WithEnvironment("Nexus__Url", nexusUrl)
     .WithEnvironment("Nexus__Password", nexusPassword)
     .WithEnvironment("Nexus__DockerRegistryHost", nexusDockerHost)

@@ -20,8 +20,6 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <!-- Wolverine + AspNetCore lets Minimal API endpoints dispatch commands/queries
-         through the bus with a one-line `InvokeAsync(...)` style. -->
     <PackageReference Include="WolverineFx" Version="6.4.3" />
     <PackageReference Include="WolverineFx.Http" Version="6.4.3" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.0.0" />

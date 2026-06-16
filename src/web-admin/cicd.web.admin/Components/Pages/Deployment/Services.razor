@@ -1,5 +1,6 @@
 @page "/deployment/services"
 @inject DeploymentApiClient Api
+@inject INexusClient Nexus
 @inject NavigationManager Nav
 @inject ISnackbar Snackbar
 
@@ -7,143 +8,123 @@
 
 <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4">
     <MudText Typo="Typo.h4">Services</MudText>
-    <MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-secondary);">
-        deployment catalog
-    </MudText>
+    <MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-secondary);">deployable units (a name + its Nexus container)</MudText>
     <MudSpacer />
-    <MudSwitch T="bool"
-               @bind-Value="_onlyActive"
-               @bind-Value:after="LoadAsync"
-               Color="Color.Primary"
-               Label="Active only" />
-    <MudButton Variant="Variant.Filled"
-               Color="Color.Primary"
-               StartIcon="@Icons.Material.Filled.Add"
-               OnClick="OpenRegisterDialog">
-        Register
-    </MudButton>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="OpenCreate">Add service</MudButton>
 </MudStack>
 
-@if (_error is { Length: > 0 })
-{
-    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="my-2">@_error</MudAlert>
-}
+@if (_error is { Length: > 0 }) { <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="my-2">@_error</MudAlert> }
 
 <MudPaper Elevation="1" Class="pa-4 mb-4">
-    @if (_loading && _services is null)
+    @if (_loading && _items is null) { <MudProgressLinear Indeterminate="true" /> }
+    else if (_items is { Count: 0 }) { <MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-secondary);">No services yet.</MudText> }
+    else if (_items is not null)
     {
-        <MudProgressLinear Indeterminate="true" />
-    }
-    else if (_services is { Count: 0 })
-    {
-        <MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-secondary);">
-            No services registered yet. Click <strong>Register</strong> to add one.
-        </MudText>
-    }
-    else if (_services is not null)
-    {
-        <MudTable Items="@_services"
-                  Dense="true"
-                  Hover="true"
-                  Striped="true"
-                  Filter="new Func<ServiceDto, bool>(MatchesFilter)"
-                  T="ServiceDto">
-            <ToolBarContent>
-                <MudTextField @bind-Value="_filter"
-                              Placeholder="Filter by name, kind, repo…"
-                              Adornment="Adornment.Start"
-                              AdornmentIcon="@Icons.Material.Filled.Search"
-                              IconSize="Size.Small"
-                              Variant="Variant.Outlined"
-                              Margin="Margin.Dense"
-                              Clearable="true"
-                              Immediate="true"
-                              Style="max-width: 28rem;" />
-            </ToolBarContent>
+        <MudTable Items="@_items" Dense="true" Hover="true" Striped="true" T="ServiceDto">
             <HeaderContent>
-                <MudTh>Name</MudTh>
-                <MudTh Style="width: 9rem;">Kind</MudTh>
-                <MudTh>Repository</MudTh>
-                <MudTh Style="width: 8rem;">Framework</MudTh>
-                <MudTh Style="width: 6rem;">Status</MudTh>
-                <MudTh Style="width: 7rem; text-align: right;"></MudTh>
+                <MudTh>Name</MudTh><MudTh>Container</MudTh><MudTh Style="width:6rem;">Status</MudTh><MudTh Style="width:16rem; text-align:right;"></MudTh>
             </HeaderContent>
             <RowTemplate>
-                <MudTd>
-                    <MudLink Href="@($"/deployment/services/{context.Id}")">@context.Name</MudLink>
-                </MudTd>
-                <MudTd>
-                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">
-                        @context.Kind
-                    </MudChip>
-                </MudTd>
-                <MudTd Style="font-family: ui-monospace, monospace; font-size: 0.85em;">
-                    @context.RepositoryUrl
-                </MudTd>
-                <MudTd>@context.TargetFramework</MudTd>
-                <MudTd>
-                    <MudChip T="string"
-                             Size="Size.Small"
-                             Color="@(context.IsActive ? Color.Success : Color.Default)"
-                             Variant="Variant.Filled">
-                        @(context.IsActive ? "Active" : "Inactive")
-                    </MudChip>
-                </MudTd>
-                <MudTd Style="text-align: right; white-space: nowrap;">
-                    <MudTooltip Text="Edit">
-                        <MudIconButton Icon="@Icons.Material.Filled.Edit"
-                                       Size="Size.Small"
-                                       OnClick="@(() => Nav.NavigateTo($"/deployment/services/{context.Id}"))" />
-                    </MudTooltip>
+                <MudTd>@context.Name</MudTd>
+                <MudTd Style="font-family: ui-monospace, monospace; font-size:0.85em;">@context.ContainerName</MudTd>
+                <MudTd><MudChip T="string" Size="Size.Small" Color="@(context.IsActive ? Color.Success : Color.Default)" Variant="Variant.Filled">@(context.IsActive ? "Active" : "Inactive")</MudChip></MudTd>
+                <MudTd Style="text-align:right; white-space:nowrap;">
+                    <MudButton Size="Size.Small" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Link" OnClick="@(() => Nav.NavigateTo($"/deployment/mappings?serviceId={context.Id}"))">Mappings</MudButton>
+                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => OpenEdit(context))" />
+                    <MudIconButton Size="Size.Small" Icon="@(context.IsActive ? Icons.Material.Filled.ToggleOn : Icons.Material.Filled.ToggleOff)" Color="@(context.IsActive ? Color.Success : Color.Default)" OnClick="@(() => ToggleAsync(context))" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => DeleteAsync(context))" />
                 </MudTd>
             </RowTemplate>
         </MudTable>
     }
 </MudPaper>
 
+<MudDialog @bind-Visible="_show" Options="_dlg">
+    <TitleContent>@(_editingId is null ? "Add service" : "Edit service")</TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_form.Name" Label="Name" Required="true" />
+        @if (_names.Count > 0)
+        {
+            <MudSelect @bind-Value="_form.ContainerName" Label="Container (from Nexus)" T="string" Required="true">
+                @foreach (var n in _names) { <MudSelectItem Value="@n">@n</MudSelectItem> }
+            </MudSelect>
+        }
+        else
+        {
+            <MudTextField @bind-Value="_form.ContainerName" Label="Container name" Required="true"
+                          HelperText="@(_nexusNote)" />
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _show = false)">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync" Disabled="_busy">@(_editingId is null ? "Add" : "Save")</MudButton>
+    </DialogActions>
+</MudDialog>
+
 @code {
-    private IReadOnlyList<ServiceDto>? _services;
-    private string _filter = "";
-    private bool _onlyActive;
-    private bool _loading;
+    private IReadOnlyList<ServiceDto>? _items;
+    private bool _loading, _busy, _show;
     private string? _error;
+    private Guid? _editingId;
+    private Form _form = new();
+    private IReadOnlyList<string> _names = new List<string>();
+    private string _nexusNote = "";
+    private static readonly DialogOptions _dlg = new() { MaxWidth = MaxWidth.Small, FullWidth = true };
 
     protected override Task OnInitializedAsync() => LoadAsync();
 
     private async Task LoadAsync()
     {
         _loading = true; _error = null; StateHasChanged();
+        try { _items = await Api.ListServicesAsync(); }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; StateHasChanged(); }
+    }
+
+    private async Task OpenCreate()
+    {
+        _editingId = null; _form = new Form(); _show = true;
+        await LoadContainerNamesAsync();
+    }
+
+    private async Task OpenEdit(ServiceDto s)
+    {
+        _editingId = s.Id; _form = new Form { Name = s.Name, ContainerName = s.ContainerName }; _show = true;
+        await LoadContainerNamesAsync();
+    }
+
+    private async Task LoadContainerNamesAsync()
+    {
+        _names = new List<string>(); _nexusNote = "";
+        if (!Nexus.IsConfigured) { _nexusNote = $"Nexus not configured ({Nexus.ConfigurationError}); type the name."; return; }
+        try { _names = (await Nexus.ListDockerImagesAsync()).Select(i => i.Name).Distinct().OrderBy(n => n).ToList(); }
+        catch (Exception ex) { _nexusNote = $"Could not list Nexus images: {ex.Message}"; }
+    }
+
+    private async Task SaveAsync()
+    {
+        _busy = true;
         try
         {
-            _services = await Api.ListServicesAsync(_onlyActive ? true : null);
+            if (_editingId is { } id) { await Api.UpdateServiceAsync(id, new UpdateServiceRequest(_form.Name, _form.ContainerName)); Snackbar.Add("Saved.", Severity.Success); }
+            else { await Api.CreateServiceAsync(new CreateServiceRequest(_form.Name, _form.ContainerName)); Snackbar.Add("Added.", Severity.Success); }
+            _show = false; await LoadAsync();
         }
-        catch (Exception ex)
-        {
-            _error = ex.Message;
-        }
-        finally
-        {
-            _loading = false;
-            StateHasChanged();
-        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        finally { _busy = false; }
     }
 
-    private bool MatchesFilter(ServiceDto s)
+    private async Task ToggleAsync(ServiceDto s)
     {
-        if (string.IsNullOrWhiteSpace(_filter)) return true;
-        var q = _filter.Trim();
-        return s.Name.Contains(q, StringComparison.OrdinalIgnoreCase)
-               || s.Kind.ToString().Contains(q, StringComparison.OrdinalIgnoreCase)
-               || s.RepositoryUrl.Contains(q, StringComparison.OrdinalIgnoreCase)
-               || s.TargetFramework.Contains(q, StringComparison.OrdinalIgnoreCase);
+        try { if (s.IsActive) await Api.DeactivateServiceAsync(s.Id); else await Api.ActivateServiceAsync(s.Id); await LoadAsync(); }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
     }
 
-    private async Task OpenRegisterDialog()
+    private async Task DeleteAsync(ServiceDto s)
     {
-        // Inline dialog via simple navigation to a "new" route — keeps the form
-        // logic in one place and lets the URL be sharable. The form lives on
-        // ServiceDetail with a special "new" id.
-        await Task.CompletedTask;
-        Nav.NavigateTo("/deployment/services/new");
+        try { await Api.DeleteServiceAsync(s.Id); Snackbar.Add($"Deleted '{s.Name}'.", Severity.Success); await LoadAsync(); }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
     }
+
+    private sealed class Form { public string Name { get; set; } = ""; public string ContainerName { get; set; } = ""; }
 }

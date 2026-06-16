@@ -1,0 +1,62 @@
+@page "/deployment/runs"
+@inject DeploymentApiClient Api
+@inject ISnackbar Snackbar
+
+<PageTitle>Deployment — Runs</PageTitle>
+
+<MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4">
+    <MudText Typo="Typo.h4">Deployments</MudText>
+    <MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-secondary);">history of deployment runs (auto + manual)</MudText>
+    <MudSpacer />
+    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" OnClick="LoadAsync">Refresh</MudButton>
+</MudStack>
+
+@if (_error is { Length: > 0 }) { <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="my-2">@_error</MudAlert> }
+
+<MudPaper Elevation="1" Class="pa-4 mb-4">
+    @if (_loading && _items is null) { <MudProgressLinear Indeterminate="true" /> }
+    else if (_items is { Count: 0 }) { <MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-secondary);">No deployments yet.</MudText> }
+    else if (_items is not null)
+    {
+        <MudTable Items="@_items" Dense="true" Hover="true" Striped="true" T="DeploymentRunDto">
+            <HeaderContent><MudTh Style="width:7rem;">Status</MudTh><MudTh>Service</MudTh><MudTh>Version</MudTh><MudTh>Cloud Run</MudTh><MudTh>Trigger</MudTh><MudTh>Revision</MudTh><MudTh Style="width:11rem;">When</MudTh></HeaderContent>
+            <RowTemplate>
+                <MudTd><MudChip T="string" Size="Size.Small" Color="@StatusColor(context.Status)" Variant="Variant.Filled">@context.Status</MudChip></MudTd>
+                <MudTd>@context.ServiceName</MudTd>
+                <MudTd Style="font-family: ui-monospace, monospace; font-size:0.85em;">@context.Version</MudTd>
+                <MudTd Style="font-family: ui-monospace, monospace; font-size:0.8em;">
+                    @context.CloudRunServiceName
+                    @if (context.Status == DeploymentRunStatusDto.Failed && !string.IsNullOrEmpty(context.FailureReason))
+                    { <MudTooltip Text="@context.FailureReason"><MudIcon Icon="@Icons.Material.Filled.ErrorOutline" Color="Color.Error" Size="Size.Small" /></MudTooltip> }
+                </MudTd>
+                <MudTd><MudChip T="string" Size="Size.Small" Variant="Variant.Text">@context.Trigger</MudChip></MudTd>
+                <MudTd Style="font-family: ui-monospace, monospace; font-size:0.8em;">@context.CloudRunRevision</MudTd>
+                <MudTd>@context.RequestedAtUtc.LocalDateTime.ToString("g")</MudTd>
+            </RowTemplate>
+        </MudTable>
+    }
+</MudPaper>
+
+@code {
+    private IReadOnlyList<DeploymentRunDto>? _items;
+    private bool _loading;
+    private string? _error;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true; _error = null; StateHasChanged();
+        try { _items = await Api.ListRunsAsync(); }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; StateHasChanged(); }
+    }
+
+    private static Color StatusColor(DeploymentRunStatusDto s) => s switch
+    {
+        DeploymentRunStatusDto.Succeeded => Color.Success,
+        DeploymentRunStatusDto.Failed => Color.Error,
+        DeploymentRunStatusDto.Running => Color.Info,
+        _ => Color.Default,
+    };
+}

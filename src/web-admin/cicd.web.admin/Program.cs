@@ -4,8 +4,6 @@ using Cicd.Web.Admin.Components;
 using Cicd.Web.Admin.Services;
 using Cicd.Web.Admin.Services.Builds;
 using Cicd.Web.Admin.Services.Ci;
-using Cicd.Web.Admin.Services.Deployment;
-using Cicd.Web.Admin.Services.Publisher;
 using Cicd.Web.Admin.Services.Gcp;
 using Cicd.Web.Admin.Services.Nexus;
 using Microsoft.EntityFrameworkCore;
@@ -74,19 +72,6 @@ var gcpOptions = builder.Configuration.GetSection("Google").Get<GcpOptions>() ??
 builder.Services.AddSingleton(gcpOptions);
 builder.Services.AddSingleton<IGcpClient, GcpClient>();
 
-// Deployment.Api — typed HttpClient. BaseUrl from config (Deployment:Api:BaseUrl).
-// The API runs as a separate service (compose: deployment-api); 5000 is the dev default.
-var deploymentApiOptions = builder.Configuration.GetSection(DeploymentApiOptions.SectionName).Get<DeploymentApiOptions>()
-                           ?? new DeploymentApiOptions();
-builder.Services.AddSingleton(deploymentApiOptions);
-builder.Services.AddHttpClient<DeploymentApiClient>(c =>
-{
-    c.BaseAddress = new Uri(deploymentApiOptions.BaseUrl.EndsWith('/')
-        ? deploymentApiOptions.BaseUrl
-        : deploymentApiOptions.BaseUrl + "/");
-    c.Timeout = TimeSpan.FromSeconds(30);
-});
-
 // Jenkins CI service (Jenkins.Api) — typed HttpClient. BaseUrl from config
 // (JenkinsApi:BaseUrl); separate service from the direct Jenkins-server connection.
 var jenkinsApiOptions = builder.Configuration.GetSection(JenkinsApiOptions.SectionName).Get<JenkinsApiOptions>()
@@ -100,16 +85,15 @@ builder.Services.AddHttpClient<JenkinsApiClient>(c =>
     c.Timeout = TimeSpan.FromSeconds(30);
 });
 
-// Publisher service (Publisher.Api) — typed HttpClient. BaseUrl from config (PublisherApi:BaseUrl).
-var publisherApiOptions = builder.Configuration.GetSection(PublisherApiOptions.SectionName).Get<PublisherApiOptions>()
-                          ?? new PublisherApiOptions();
-builder.Services.AddSingleton(publisherApiOptions);
-builder.Services.AddHttpClient<PublisherApiClient>(c =>
+// Deployment service (Deployment.Api) — typed HttpClient. BaseUrl from config (Deployment:Api:BaseUrl).
+var deploymentApiOptions = builder.Configuration.GetSection(Cicd.Web.Admin.Services.Deployment.DeploymentApiOptions.SectionName)
+                               .Get<Cicd.Web.Admin.Services.Deployment.DeploymentApiOptions>()
+                           ?? new Cicd.Web.Admin.Services.Deployment.DeploymentApiOptions();
+builder.Services.AddSingleton(deploymentApiOptions);
+builder.Services.AddHttpClient<Cicd.Web.Admin.Services.Deployment.DeploymentApiClient>(c =>
 {
-    c.BaseAddress = new Uri(publisherApiOptions.BaseUrl.EndsWith('/')
-        ? publisherApiOptions.BaseUrl
-        : publisherApiOptions.BaseUrl + "/");
-    c.Timeout = TimeSpan.FromSeconds(30);
+    c.BaseAddress = new Uri(deploymentApiOptions.BaseUrl.EndsWith('/') ? deploymentApiOptions.BaseUrl : deploymentApiOptions.BaseUrl + "/");
+    c.Timeout = TimeSpan.FromSeconds(60);
 });
 
 var app = builder.Build();

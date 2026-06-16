@@ -12,61 +12,51 @@ using Wolverine.SqlServer;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.AddServiceDefaults();
-
 builder.Services.AddOpenApi();
+builder.Services.ConfigureHttpJsonOptions(opts => opts.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
-// Match the Blazor client's JSON shape: enums on the wire are strings
-// (ServiceKindDto = "WebApi", not 0). Without this, Minimal API parameter
-// binding fails with "Failed to read parameter '... body'" the moment a
-// payload contains an enum value.
-builder.Services.ConfigureHttpJsonOptions(opts =>
-{
-    opts.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
-});
-
-// Application layer: FluentValidation registrations + any pure use-case services.
 builder.Services.AddDeploymentApplication();
-
-// Infrastructure layer: EF Core DbContext + repositories + UnitOfWork.
-// Connection string lives at ConnectionStrings:Deployment.
 builder.Services.AddDeploymentInfrastructure(builder.Configuration);
 
-// In-process deployment runner. Disable via Deployment:Runner:Enabled=false
-// when running a separate worker host that owns the runner end-to-end.
-builder.Services.AddDeploymentRunner(builder.Configuration);
-
-// Wolverine: CQRS dispatcher + in-process bus. Two notable conveniences:
-//   .UseEntityFrameworkCoreTransactions() makes handlers automatically participate
-//      in the DeploymentDbContext's transaction (commits with SaveChangesAsync).
-//   .PersistMessagesWithSqlServer(...) sets up the outbox + inbox tables on the
-//      same DB so messages survive crashes and never get lost between bus and DB.
-// Handlers are discovered by convention from Application + Infrastructure assemblies.
+// Wolverine: CQRS dispatcher + in-process bus + durable cross-service messaging.
+// Handlers (the ContainerPublished consumer, the run executor, the success translator) are
+// discovered from Application + Infrastructure.
 builder.Host.UseWolverine(opts =>
 {
     opts.Discovery.IncludeAssembly(typeof(Deployment.Application.DependencyInjection).Assembly);
     opts.Discovery.IncludeAssembly(typeof(DeploymentDbContext).Assembly);
 
+    // The repositories, step executors, and the directly-invoked RequestDeploymentHandler all resolve
+    // to *internal* concrete types (Infrastructure persistence/steps). Wolverine's generated handler
+    // code can't `new` up an internal type, so without this it throws InvalidServiceLocationException
+    // (ServiceLocationPolicy.NotAllowed) and the DeploymentRunRequested/ContainerPublished handlers
+    // never compile — leaving deployment runs stuck Pending. Tell Wolverine to resolve these from the
+    // container at runtime instead (mirrors the jenkins service's IDeploymentReleaseClient handling).
+    opts.CodeGeneration.AlwaysUseServiceLocationFor<Deployment.Domain.Runs.IDeploymentRunRepository>();
+    opts.CodeGeneration.AlwaysUseServiceLocationFor<Deployment.Domain.Mappings.IDeploymentMappingRepository>();
+    opts.CodeGeneration.AlwaysUseServiceLocationFor<Deployment.Domain.Services.IServiceRepository>();
+    opts.CodeGeneration.AlwaysUseServiceLocationFor<Deployment.Domain.Containers.IKnownContainerRepository>();
+    // Service-located (not inlined) on purpose: the registry's constructor takes the executor
+    // collection, and letting Wolverine inline `new StepExecutorRegistry(IEnumerable<…>)` would
+    // re-trigger the codegen bug it exists to avoid (a mis-materialised executor collection).
+    opts.CodeGeneration.AlwaysUseServiceLocationFor<Deployment.Application.Abstractions.IStepExecutorRegistry>();
+    opts.CodeGeneration.AlwaysUseServiceLocationFor<Deployment.Application.Features.Runs.RequestDeploymentHandler>();
+
     opts.UseEntityFrameworkCoreTransactions();
 
     var connection = builder.Configuration.GetConnectionString("Deployment");
     if (!string.IsNullOrEmpty(connection))
-    {
         opts.PersistMessagesWithSqlServer(connection);
-    }
 
-    // Cross-service event bus (provider-pluggable; RabbitMQ by default). Deployment
-    // publishes deployment outcomes; it subscribes to CI container-published facts.
+    // Consume CI container-published facts; publish service-deployed facts.
     opts.AddCicdMessaging(builder.Configuration, topology => topology
-        .Publish<Cicd.IntegrationEvents.Deployment.DeploymentSucceeded>("deployment.events")
+        .Publish<Cicd.IntegrationEvents.Deployment.ServiceDeployed>("deployment.events")
         .Subscribe("ci.events", subscriber: "deployment"));
 });
 
 var app = builder.Build();
-
 app.MapDefaultEndpoints();
 
-// Apply EF migrations at startup when Database:AutoMigrate is set (compose/dev
-// convenience). Retries so a not-yet-ready SQL Server doesn't crash the boot.
 if (builder.Configuration.GetValue<bool>("Database:AutoMigrate"))
 {
     using var scope = app.Services.CreateScope();
@@ -82,28 +72,14 @@ if (builder.Configuration.GetValue<bool>("Database:AutoMigrate"))
     }
 }
 
-if (app.Environment.IsDevelopment())
-{
-    app.MapOpenApi();
-}
+if (app.Environment.IsDevelopment()) app.MapOpenApi();
+if (!app.Environment.IsDevelopment()) app.UseHttpsRedirection();
 
-if (!app.Environment.IsDevelopment())
-{
-    app.UseHttpsRedirection();
-}
+app.MapGet("/", () => Results.Ok(new { name = "Deployment.Api", status = "ready" }));
 
-app.MapGet("/", () => Results.Ok(new
-{
-    name = "Deployment.Api",
-    status = "ready",
-}));
-
-app.MapCatalogServiceEndpoints();
-app.MapCatalogApplicationEndpoints();
-app.MapReleaseEndpoints();
+app.MapServiceEndpoints();
 app.MapEnvironmentEndpoints();
-app.MapConfigurationEndpoints();
-app.MapDeploymentEndpoints();
-app.MapRunnerEndpoints();
+app.MapMappingEndpoints();
+app.MapRunEndpoints();
 
 app.Run();

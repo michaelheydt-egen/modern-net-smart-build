@@ -98,35 +98,6 @@
                     SBOM
                 </MudNavLink>
             </MudNavGroup>
-            <MudNavGroup Title="Deployment"
-                         Icon="@Icons.Material.Filled.RocketLaunch"
-                         Expanded="true">
-                <MudNavLink Href="deployment/services"
-                            Match="NavLinkMatch.Prefix"
-                            Icon="@Icons.Material.Filled.Apps">
-                    Services
-                </MudNavLink>
-                <MudNavLink Href="deployment/applications"
-                            Match="NavLinkMatch.Prefix"
-                            Icon="@Icons.Material.Filled.AppRegistration">
-                    Applications
-                </MudNavLink>
-                <MudNavLink Href="deployment/environments"
-                            Match="NavLinkMatch.Prefix"
-                            Icon="@Icons.Material.Filled.Public">
-                    Environments
-                </MudNavLink>
-                <MudNavLink Href="deployment/deployments"
-                            Match="NavLinkMatch.Prefix"
-                            Icon="@Icons.Material.Filled.RocketLaunch">
-                    Deployments
-                </MudNavLink>
-                <MudNavLink Href="deployment/dashboards/effective-versions"
-                            Match="NavLinkMatch.Prefix"
-                            Icon="@Icons.Material.Filled.Dashboard">
-                    Effective versions
-                </MudNavLink>
-            </MudNavGroup>
             <MudNavGroup Title="CI"
                          Icon="@Icons.Material.Filled.Hub"
                          Expanded="true">
@@ -141,29 +112,14 @@
                     Pipelines
                 </MudNavLink>
             </MudNavGroup>
-            <MudNavGroup Title="Publisher"
-                         Icon="@Icons.Material.Filled.CloudUpload"
+            <MudNavGroup Title="Deployment"
+                         Icon="@Icons.Material.Filled.RocketLaunch"
                          Expanded="true">
-                <MudNavLink Href="publisher/inventory"
-                            Match="NavLinkMatch.Prefix"
-                            Icon="@Icons.Material.Filled.Inventory2">
-                    Inventory
-                </MudNavLink>
-                <MudNavLink Href="publisher/registries"
-                            Match="NavLinkMatch.Prefix"
-                            Icon="@Icons.Material.Filled.Dns">
-                    Registries
-                </MudNavLink>
-                <MudNavLink Href="publisher/rules"
-                            Match="NavLinkMatch.Prefix"
-                            Icon="@Icons.Material.Filled.Rule">
-                    Rules
-                </MudNavLink>
-                <MudNavLink Href="publisher/promotions"
-                            Match="NavLinkMatch.Prefix"
-                            Icon="@Icons.Material.Filled.History">
-                    Promotions
-                </MudNavLink>
+                <MudNavLink Href="deployment/services" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Apps">Services</MudNavLink>
+                <MudNavLink Href="deployment/environments" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Public">Environments</MudNavLink>
+                <MudNavLink Href="deployment/mappings" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Link">Mappings</MudNavLink>
+                <MudNavLink Href="deployment/containers" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Inventory2">Inventory</MudNavLink>
+                <MudNavLink Href="deployment/runs" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.History">Deployments</MudNavLink>
             </MudNavGroup>
             <MudNavGroup Title="Cloud"
                          Icon="@Icons.Material.Filled.Cloud"

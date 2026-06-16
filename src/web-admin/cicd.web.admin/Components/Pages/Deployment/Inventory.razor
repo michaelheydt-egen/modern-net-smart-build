@@ -1,0 +1,137 @@
+@page "/deployment/containers"
+@inject DeploymentApiClient Api
+@inject INexusClient Nexus
+@inject NexusOptions NexusOpts
+@inject ISnackbar Snackbar
+
+<PageTitle>Deployment — Inventory</PageTitle>
+
+<MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4">
+    <MudText Typo="Typo.h4">Container inventory</MudText>
+    <MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-secondary);">
+        latest container seen per name — what deployments draw from (fed by the CI bus event; add here to test)
+    </MudText>
+    <MudSpacer />
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="OpenAdd">Add test container</MudButton>
+    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" OnClick="LoadAsync">Refresh</MudButton>
+</MudStack>
+
+@if (_error is { Length: > 0 }) { <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="my-2">@_error</MudAlert> }
+
+<MudPaper Elevation="1" Class="pa-4 mb-4">
+    @if (_loading && _items is null) { <MudProgressLinear Indeterminate="true" /> }
+    else if (_items is { Count: 0 }) { <MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-secondary);">No containers recorded yet. Run a CI build (pushes to Nexus → bus event), or click <strong>Add test container</strong>.</MudText> }
+    else if (_items is not null)
+    {
+        <MudTable Items="@_items" Dense="true" Hover="true" Striped="true" T="KnownContainerDto">
+            <HeaderContent><MudTh>Container</MudTh><MudTh>Version</MudTh><MudTh>Nexus ref</MudTh><MudTh Style="width:11rem;">Last seen</MudTh></HeaderContent>
+            <RowTemplate>
+                <MudTd Style="font-family: ui-monospace, monospace; font-size:0.85em;">@context.ContainerName</MudTd>
+                <MudTd>@context.Version</MudTd>
+                <MudTd Style="font-family: ui-monospace, monospace; font-size:0.8em;">@context.NexusRef</MudTd>
+                <MudTd>@context.LastSeenAtUtc.LocalDateTime.ToString("g")</MudTd>
+            </RowTemplate>
+        </MudTable>
+    }
+</MudPaper>
+
+<MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-secondary);">
+    To deploy: pick a mapping on the <MudLink Href="/deployment/mappings">Mappings</MudLink> page and click <strong>Deploy</strong> (uses the latest container above).
+</MudText>
+
+<MudDialog @bind-Visible="_show" Options="_dlg">
+    <TitleContent>Add test container</TitleContent>
+    <DialogContent>
+        @if (!Nexus.IsConfigured)
+        {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Class="mb-2">Nexus not configured (@Nexus.ConfigurationError) — enter values manually.</MudAlert>
+        }
+        else if (_loadingNexus) { <MudProgressLinear Indeterminate="true" Class="mb-2" /> }
+
+        @if (_names.Count > 0)
+        {
+            <MudSelect @bind-Value="_name" Label="Container (from Nexus)" T="string" @bind-Value:after="OnNameChanged">
+                @foreach (var n in _names) { <MudSelectItem Value="@n">@n</MudSelectItem> }
+            </MudSelect>
+            @if (_tags.Count > 0)
+            {
+                <MudSelect @bind-Value="_version" Label="Tag / version" T="string">
+                    @foreach (var t in _tags) { <MudSelectItem Value="@t">@t</MudSelectItem> }
+                </MudSelect>
+            }
+            else { <MudTextField @bind-Value="_version" Label="Tag / version" /> }
+        }
+        else
+        {
+            <MudTextField @bind-Value="_name" Label="Container name" Required="true" />
+            <MudTextField @bind-Value="_version" Label="Tag / version" Required="true" />
+        }
+        <MudTextField @bind-Value="_nexusRef" Label="Nexus pull ref" HelperText="Auto-built from host/name:tag; edit if needed." />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _show = false)">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync" Disabled="@(_busy || string.IsNullOrWhiteSpace(_name) || string.IsNullOrWhiteSpace(_version))">Add</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private IReadOnlyList<KnownContainerDto>? _items;
+    private bool _loading, _busy, _show, _loadingNexus;
+    private string? _error;
+    private IReadOnlyList<DockerImage> _images = new List<DockerImage>();
+    private IReadOnlyList<string> _names = new List<string>();
+    private List<string> _tags = new();
+    private string _name = "", _version = "", _nexusRef = "";
+    private static readonly DialogOptions _dlg = new() { MaxWidth = MaxWidth.Small, FullWidth = true };
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true; _error = null; StateHasChanged();
+        try { _items = await Api.ListKnownContainersAsync(); }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; StateHasChanged(); }
+    }
+
+    private async Task OpenAdd()
+    {
+        _name = ""; _version = ""; _nexusRef = ""; _names = new List<string>(); _tags = new(); _show = true;
+        if (!Nexus.IsConfigured) return;
+        _loadingNexus = true; StateHasChanged();
+        try
+        {
+            _images = await Nexus.ListDockerImagesAsync();
+            _names = _images.Select(i => i.Name).Distinct().OrderBy(n => n).ToList();
+        }
+        catch (Exception ex) { Snackbar.Add($"Nexus list failed: {ex.Message}", Severity.Error); }
+        finally { _loadingNexus = false; StateHasChanged(); }
+    }
+
+    private void OnNameChanged()
+    {
+        _tags = _images.Where(i => i.Name == _name).Select(i => i.Tag).Distinct().OrderByDescending(t => t).ToList();
+        _version = _tags.FirstOrDefault() ?? "";
+        BuildRef();
+    }
+
+    private void BuildRef()
+    {
+        if (!string.IsNullOrWhiteSpace(_name) && !string.IsNullOrWhiteSpace(_version))
+            _nexusRef = $"{NexusOpts.DockerRegistryHost}/{_name}:{_version}";
+    }
+
+    private async Task SaveAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_nexusRef)) BuildRef();
+        _busy = true;
+        try
+        {
+            await Api.AddKnownContainerAsync(new AddKnownContainerRequest(_name.Trim(), _version.Trim(), _nexusRef.Trim()));
+            Snackbar.Add($"Recorded '{_name}:{_version}'.", Severity.Success);
+            _show = false; await LoadAsync();
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        finally { _busy = false; }
+    }
+}

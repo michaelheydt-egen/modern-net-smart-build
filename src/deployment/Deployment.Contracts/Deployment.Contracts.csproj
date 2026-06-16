@@ -7,11 +7,6 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 
-  <!--
-    Wire-format DTOs shared by Deployment.Api (server) and any client
-    (cicd.web.admin, future CLI tools, CI scripts). No project references,
-    no NuGet dependencies — keeps the surface area honest and avoids
-    leaking Application/Wolverine/EF concerns to consumers.
-  -->
+  <!-- Wire-format DTOs shared by Deployment.Api and clients (web-admin). No deps. -->
 
 </Project>

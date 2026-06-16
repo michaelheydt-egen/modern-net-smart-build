@@ -1,2 +1,0 @@
-# Concrete IRepository<TAggregate, TId> implementations live here.
-# Conventionally one file per aggregate, named e.g. ServiceRepository.cs.

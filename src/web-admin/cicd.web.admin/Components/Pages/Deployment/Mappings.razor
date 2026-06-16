@@ -1,0 +1,135 @@
+@page "/deployment/mappings"
+@inject DeploymentApiClient Api
+@inject ISnackbar Snackbar
+
+<PageTitle>Deployment — Mappings</PageTitle>
+
+<MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4">
+    <MudText Typo="Typo.h4">Mappings</MudText>
+    <MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-secondary);">service → environment: Cloud Run target + auto-deploy</MudText>
+    <MudSpacer />
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="OpenCreate"
+               Disabled="@(_services is null or { Count: 0 } || _envs is null or { Count: 0 })">Add mapping</MudButton>
+</MudStack>
+
+@if (_error is { Length: > 0 }) { <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="my-2">@_error</MudAlert> }
+@if (_services is { Count: 0 } || _envs is { Count: 0 })
+{
+    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Class="my-2">Add at least one <MudLink Href="/deployment/services">service</MudLink> and one <MudLink Href="/deployment/environments">environment</MudLink> first.</MudAlert>
+}
+
+<MudPaper Elevation="1" Class="pa-4 mb-4">
+    @if (_loading && _items is null) { <MudProgressLinear Indeterminate="true" /> }
+    else if (_items is { Count: 0 }) { <MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-secondary);">No mappings yet. Nothing deploys automatically until a mapping has auto-deploy on.</MudText> }
+    else if (_items is not null)
+    {
+        <MudTable Items="@_items" Dense="true" Hover="true" Striped="true" T="DeploymentMappingDto">
+            <HeaderContent><MudTh>Service</MudTh><MudTh>Environment</MudTh><MudTh>Cloud Run</MudTh><MudTh>Steps</MudTh><MudTh Style="width:8rem;">Auto-deploy</MudTh><MudTh Style="width:14rem; text-align:right;"></MudTh></HeaderContent>
+            <RowTemplate>
+                <MudTd>@context.ServiceName</MudTd>
+                <MudTd>@context.EnvironmentName</MudTd>
+                <MudTd Style="font-family: ui-monospace, monospace; font-size:0.85em;">@context.CloudRunServiceName</MudTd>
+                <MudTd Style="font-size:0.8em;">@string.Join(" → ", context.Steps.OrderBy(s => s.Order).Select(s => s.Kind))</MudTd>
+                <MudTd><MudSwitch T="bool" Value="@context.AutoDeploy" Color="Color.Primary" ValueChanged="@(v => ToggleAutoAsync(context, v))" /></MudTd>
+                <MudTd Style="text-align:right; white-space:nowrap;">
+                    <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.RocketLaunch" OnClick="@(() => DeployAsync(context))">Deploy</MudButton>
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => DeleteAsync(context))" />
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    }
+</MudPaper>
+
+<MudDialog @bind-Visible="_show" Options="_dlg">
+    <TitleContent>Add mapping</TitleContent>
+    <DialogContent>
+        <MudSelect @bind-Value="_form.ServiceId" Label="Service" T="Guid" Required="true">
+            @foreach (var s in _services ?? new List<ServiceDto>()) { <MudSelectItem Value="@s.Id">@s.Name (@s.ContainerName)</MudSelectItem> }
+        </MudSelect>
+        <MudSelect @bind-Value="_form.EnvironmentId" Label="Environment" T="Guid" Required="true">
+            @foreach (var e in _envs ?? new List<EnvironmentDto>()) { <MudSelectItem Value="@e.Id">@e.Name (@e.GcpProject/@e.Region)</MudSelectItem> }
+        </MudSelect>
+        <MudTextField @bind-Value="_form.CloudRunServiceName" Label="Cloud Run service name" Required="true" />
+        <MudSwitch T="bool" @bind-Value="_form.AutoDeploy" Color="Color.Primary" Label="Auto-deploy on new container push" Class="mt-2" />
+        <MudText Typo="Typo.caption" Style="color: var(--mud-palette-text-secondary);">Recipe: GarPush → CloudRunDeploy (default).</MudText>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _show = false)">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync" Disabled="_busy">Add</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [SupplyParameterFromQuery] public Guid? ServiceId { get; set; }
+
+    private IReadOnlyList<DeploymentMappingDto>? _items;
+    private IReadOnlyList<ServiceDto>? _services;
+    private IReadOnlyList<EnvironmentDto>? _envs;
+    private bool _loading, _busy, _show;
+    private string? _error;
+    private Form _form = new();
+    private static readonly DialogOptions _dlg = new() { MaxWidth = MaxWidth.Small, FullWidth = true };
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true; _error = null; StateHasChanged();
+        try
+        {
+            _services = await Api.ListServicesAsync();
+            _envs = await Api.ListEnvironmentsAsync();
+            _items = await Api.ListMappingsAsync(ServiceId);
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; StateHasChanged(); }
+    }
+
+    private void OpenCreate()
+    {
+        _form = new Form
+        {
+            ServiceId = ServiceId ?? _services?.FirstOrDefault()?.Id ?? Guid.Empty,
+            EnvironmentId = _envs?.FirstOrDefault()?.Id ?? Guid.Empty,
+        };
+        _show = true;
+    }
+
+    private async Task SaveAsync()
+    {
+        _busy = true;
+        try
+        {
+            await Api.CreateMappingAsync(new CreateMappingRequest(_form.ServiceId, _form.EnvironmentId, _form.CloudRunServiceName, _form.AutoDeploy, null));
+            Snackbar.Add("Mapping added.", Severity.Success);
+            _show = false; await LoadAsync();
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        finally { _busy = false; }
+    }
+
+    private async Task ToggleAutoAsync(DeploymentMappingDto m, bool value)
+    {
+        try { await Api.SetAutoDeployAsync(m.Id, value); await LoadAsync(); }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+
+    private async Task DeployAsync(DeploymentMappingDto m)
+    {
+        try
+        {
+            var res = await Api.DeployAsync(m.Id, new TriggerDeploymentRequest(null, "ui"));
+            if (res.RunId is not null) Snackbar.Add("Deployment queued.", Severity.Success);
+            else Snackbar.Add($"No deploy: {res.Outcome}.", Severity.Info);
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+
+    private async Task DeleteAsync(DeploymentMappingDto m)
+    {
+        try { await Api.DeleteMappingAsync(m.Id); Snackbar.Add("Deleted.", Severity.Success); await LoadAsync(); }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+
+    private sealed class Form { public Guid ServiceId { get; set; } public Guid EnvironmentId { get; set; } public string CloudRunServiceName { get; set; } = ""; public bool AutoDeploy { get; set; } }
+}
