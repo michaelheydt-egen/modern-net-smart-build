@@ -6,6 +6,7 @@ pipeline {
         string(name: 'NUGET_API_KEY_CREDENTIAL_ID', defaultValue: 'rhythm-nuget', description: 'Jenkins credential id (Secret Text) holding the NuGet API key for the target feed')
         string(name: 'SBOM_NEXUS_REPO_URL', defaultValue: 'http://nexus:8081/repository/sboms/', description: 'Nexus raw (hosted) repo URL where bom.json + vulnerabilities.json are uploaded. Repo must be created as type=raw,format=hosted in Nexus first.')
         string(name: 'SBOM_NEXUS_CREDENTIAL_ID', defaultValue: 'nexus-sbom', description: 'Jenkins credential id (Username/Password) for HTTP Basic auth against the Nexus REST API used by the raw-repo PUT calls')
+        string(name: 'GIT_CREDENTIALS_ID', defaultValue: '', description: 'Jenkins credentials ID for cloning a private app repo (leave blank for public/anonymous access)')
         string(name: 'SOURCE_BUILD_JOB', defaultValue: 'cicd-build', description: 'Name of the upstream build job whose build-info.json will be pulled in')
         string(name: 'SOURCE_BUILD_NUMBER', defaultValue: '', description: 'Specific upstream build number to publish. Leave empty for the last successful build.')
     }
@@ -14,6 +15,9 @@ pipeline {
         timestamps()
         timeout(time: 30, unit: 'MINUTES')
         disableConcurrentBuilds()
+        // Repo-agnostic: we clone the app repo ourselves (from build-info.json's gitUrl,
+        // pinned to gitCommitHash) instead of relying on a pipeline-repo checkout.
+        skipDefaultCheckout(true)
     }
 
     agent {
@@ -50,15 +54,17 @@ pipeline {
 
                     // Pulls the SBOM (bom.json) and vulnerability report (vulnerabilities.json)
                     // alongside build-info.json so the upload stage can publish them in lockstep
-                    // with the .nupkg.
+                    // with the .nupkg. Copied into _meta/ so the workspace root stays free for the
+                    // app-repo clone in the next stage.
                     copyArtifacts(
                         projectName: params.SOURCE_BUILD_JOB,
                         selector: selector,
                         filter: 'build-info.json,bom.json,vulnerabilities.json,bom-vex.json',
+                        target: '_meta',
                         fingerprintArtifacts: true
                     )
 
-                    def info = readJSON file: 'build-info.json'
+                    def info = readJSON file: '_meta/build-info.json'
 
                     PACKAGE_VERSION  = info.packageVersion
                     FILE_VERSION     = info.fileVersion
@@ -69,6 +75,8 @@ pipeline {
                     SOURCE_BUILD_NUM = info.buildNumber
                     PACK_VER         = info.packVer
                     BUILD_FILE       = info.buildFile
+                    GIT_URL          = info.gitUrl
+                    GIT_BRANCH       = info.gitBranch
 
                     println "Resolved upstream build: #${SOURCE_BUILD_NUM}"
                     println "  packageVersion : ${PACKAGE_VERSION}"
@@ -77,10 +85,35 @@ pipeline {
                     println "  infoVersion    : ${INFO_VERSION}"
                     println "  packVer        : ${PACK_VER}"
                     println "  buildFile      : ${BUILD_FILE}"
+                    println "  gitUrl         : ${GIT_URL}"
+                    println "  gitBranch      : ${GIT_BRANCH}"
                     println "  gitCommitHash  : ${GIT_COMMIT_HASH}"
                     println "  gitCommitShort : ${GIT_COMMIT_SHORT}"
 
                     currentBuild.description = "publish ${params.SOURCE_BUILD_JOB} #${SOURCE_BUILD_NUM} (${PACKAGE_VERSION})"
+                }
+            }
+        }
+
+        stage ('Checkout source') {
+            steps {
+                script {
+                    if (!GIT_URL?.trim()) {
+                        error "build-info.json has no gitUrl — cannot fetch the source to pack. Re-run cicd-build to produce a gitUrl."
+                    }
+                    // Clone the exact repo + commit that cicd-build built (repo-agnostic, and
+                    // immune to the pipeline repo's HEAD advancing). _meta/ (untracked) survives.
+                    def remote = [url: GIT_URL.trim()]
+                    if (params.GIT_CREDENTIALS_ID?.trim()) {
+                        remote.credentialsId = params.GIT_CREDENTIALS_ID.trim()
+                    }
+                    println "Cloning ${GIT_URL} @ ${GIT_COMMIT_HASH}"
+                    checkout([
+                        $class: 'GitSCM',
+                        branches: [[name: GIT_COMMIT_HASH]],
+                        userRemoteConfigs: [remote]
+                    ])
+                    sh "git config --global --add safe.directory '*'"
                 }
             }
         }
@@ -149,13 +182,14 @@ pipeline {
 
                         upload() {
                             local f="\$1"
-                            if [ ! -f "\$f" ]; then
-                                echo "WARN: \$f not present in workspace — skipping upload."
+                            # Artifacts were copied from the upstream build into _meta/.
+                            if [ ! -f "_meta/\$f" ]; then
+                                echo "WARN: _meta/\$f not present in workspace — skipping upload."
                                 return 0
                             fi
                             echo "  PUT \$target/\$f"
                             curl -fsS --user "\$NEXUS_USER:\$NEXUS_PASS" \\
-                                 --upload-file "\$f" \\
+                                 --upload-file "_meta/\$f" \\
                                  "\$target/\$f"
                             echo
                         }
@@ -172,8 +206,9 @@ pipeline {
             steps {
                 // Re-archive on this job so users browsing the publish run can grab
                 // the same SBOM + vuln report without bouncing back to cicd-build.
+                // (Artifacts live under _meta/, copied from the upstream build.)
                 archiveArtifacts(
-                    artifacts: 'build-info.json,bom.json,vulnerabilities.json,bom-vex.json',
+                    artifacts: '_meta/build-info.json,_meta/bom.json,_meta/vulnerabilities.json,_meta/bom-vex.json',
                     fingerprint: true,
                     onlyIfSuccessful: true,
                     allowEmptyArchive: true)
