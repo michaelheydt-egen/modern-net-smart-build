@@ -1,103 +1,158 @@
 # Architecture
 
-Runtime architecture and CI/CD operations flow for the cicd workspace. Diagrams use [Mermaid](https://mermaid.js.org/) — they render inline in VSCode (Markdown Preview) and on GitHub.
+A repo‑agnostic CI/CD platform: Jenkins builds **any** Git repo, publishes artifacts to
+Sonatype Nexus, and an event‑driven deployment service promotes containers to Google Cloud
+(Artifact Registry → Cloud Run). The .NET services, SQL Server, and RabbitMQ are orchestrated
+locally by **.NET Aspire** (`Cicd.Aspire.Host`); Jenkins and Nexus run as standalone containers.
 
-## Runtime architecture
+Diagrams use [Mermaid](https://mermaid.js.org/) — they render in VS Code (Markdown Preview) and on GitHub.
+
+## System overview
 
 ```mermaid
-graph TB
-    User[("👤 Operator<br/>(browser)")]
+flowchart TB
+  user(["User / Browser"])
+  dev(["Developer"])
+  gitrepo[("Git repo<br/>any GIT_URL")]
 
-    subgraph WebUI["cicd.web.admin · Blazor Server · :8080"]
-        Pages["Pages<br/>Orchestrator · Pipelines<br/>Nuget · Docker · Google"]
-        Health["JenkinsHealthService<br/>(BackgroundService)"]
-        Runner["PipelineRunner<br/>(singleton · in-mem ring buf)"]
-        Orch["PipelineOrchestrator"]
-        JC["JenkinsClient<br/>(HTTP + crumb)"]
-        NC["NexusClient<br/>(HTTP Basic)"]
-        GC["GcpClient<br/>(ADC)"]
-    end
+  subgraph platform["CI/CD Platform — .NET 10 (orchestrated by Aspire)"]
+    direction TB
+    web["web-admin<br/>Blazor + MudBlazor"]
+    japi["jenkins-api<br/>CI service"]
+    dapi["deployment-api<br/>deployment service"]
+    bus{{"RabbitMQ bus<br/>ci.events · deployment.events"}}
+    sql[("SQL Server<br/>JenkinsCi DB · Deployment DB")]
+  end
 
-    subgraph Jenkins["Jenkins · :8080"]
-        Jobs[("Pipelines<br/>cicd-build<br/>cicd-publish-*")]
-    end
+  subgraph jenkins["Jenkins controller (orchestrated pipeline)"]
+    direction LR
+    jb["cicd-build"] --> js["cicd-scan"]
+    js --> jn["publish-nexus-nuget"]
+    js --> jd["publish-nexus-docker"]
+  end
 
-    subgraph Nexus["Nexus · :8081 REST · :8082 docker"]
-        NugetRepo[("nuget-hosted")]
-        DockerRepo[("docker-private")]
-    end
+  subgraph nexus["Sonatype Nexus — :8081 REST · :8082 docker"]
+    nnuget[("nuget-hosted")]
+    ndocker[("docker-hosted")]
+    nsbom[("sboms — raw")]
+  end
 
-    subgraph GCP["Google Cloud"]
-        GAR[("Artifact Registry")]
-        Run[("Cloud Run")]
-    end
+  subgraph gcp["Google Cloud — egen-gcr / us-west1"]
+    gar[("Artifact Registry")]
+    crun["Cloud Run"]
+  end
 
-    User -->|"HTTPS<br/>SignalR"| Pages
-    Pages --> Runner
-    Pages --> JC
-    Pages --> NC
-    Pages --> GC
-    Runner --> Orch
-    Orch --> JC
-    Health --> JC
+  user --> web
+  web -->|HTTP| japi
+  web -->|HTTP| dapi
+  dev -->|git push| gitrepo
 
-    JC -->|"REST + crumb<br/>progressiveHtml stream"| Jobs
-    NC -->|"/service/rest/v1<br/>components, repositories"| NugetRepo
-    NC -->|"REST"| DockerRepo
-    GC -->|"gRPC"| GAR
-    GC -->|"gRPC"| Run
+  japi -->|"orchestrate jobs (REST + crumb)"| jenkins
+  jenkins -->|"clone @ commit"| gitrepo
+  jn --> nnuget
+  jd --> ndocker
+  js --> nsbom
 
-    Jobs -.->|"nuget push"| NugetRepo
-    Jobs -.->|"docker push"| DockerRepo
-    Jobs -.->|"docker push"| GAR
-    Jobs -.->|"gcloud deploy"| Run
+  japi -->|"poll builds"| jenkins
+  japi -->|"reconcile artifacts"| nexus
+  japi <--> sql
+  dapi <--> sql
+
+  japi -->|"ContainerPublished"| bus
+  bus -->|"ci.events"| dapi
+  dapi -->|"ServiceDeployed"| bus
+  bus -->|"deployment.events"| japi
+
+  dapi -->|"GarPush — crane copy"| gar
+  ndocker -.->|"image (digest-preserving)"| gar
+  dapi -->|"CloudRunDeploy"| crun
+  crun -.->|"pull image"| gar
 ```
 
-### Notes
+## CI/CD pipeline (build → scan → publish)
 
-- **Single-direction trust**: the WebUI initiates everything. Jenkins / Nexus / GCP never call back into the WebUI — state is pulled (poll / stream), not pushed.
-- **In-memory orchestration**: `PipelineRunner` is a singleton — it survives page navigations but not WebUI restarts. Console logs live in a ~1 MB ring buffer per step.
-- **Two Nexus ports**: REST API on `:8081`, Docker registry connector on `:8082`. Same hostname, different listeners. The WebUI only talks to the REST port; the Docker connector is used by Jenkins' `docker push`.
-- **Credentials**: the WebUI reads Jenkins / Nexus credentials from environment variables (`Jenkins__ApiToken`, `Nexus__Password`); GCP uses Application Default Credentials. Nothing secret lives in `appsettings.json`.
-
-## Operations — CI/CD pipeline chain
+Each job is **repo‑agnostic**: `cicd-build` clones the caller‑supplied `GIT_URL`; the downstream
+jobs clone the exact commit recorded in `build-info.json` (forwarded via `SOURCE_BUILD_NUMBER` +
+the Copy Artifact plugin). Only apps (projects that opt in via `<Containerizable>`) produce
+containers; libraries publish NuGet only. Containers are assembled by **copying publish output**
+into a slim runtime image — never compiled inside the container.
 
 ```mermaid
 flowchart LR
-    Build["cicd-build<br/><i>build .NET, produce<br/>build-info.json artifact</i>"]
+  A["cicd-build<br/>clone GIT_URL @ commit<br/>build · discover containers<br/>→ build-info.json"]
+  B["cicd-scan<br/>clone @ commit · restore<br/>CycloneDX SBOM · NuGet vuln gate<br/>Trivy VEX"]
+  C["publish-nexus-nuget<br/>dotnet pack → push"]
+  D["publish-nexus-docker<br/>publish → copy-only image<br/>Trivy image scan → push"]
 
-    Nuget["cicd-publish-nexus-nuget<br/><i>nuget push → nuget-hosted</i>"]
-    Docker["cicd-publish-nexus-docker<br/><i>docker push → docker-private</i>"]
-    GAR["cicd-publish-gcp-gar<br/><i>docker push → Artifact Registry</i>"]
-    GCR["cicd-publish-gcp-gcr<br/><i>deploy → Cloud Run</i>"]
-
-    Build -->|"SOURCE_BUILD_NUMBER"| Nuget
-    Build -->|"SOURCE_BUILD_NUMBER"| Docker
-    Docker -->|"SOURCE_BUILD_NUMBER"| GAR
-    GAR -->|"SOURCE_BUILD_NUMBER"| GCR
-
-    classDef build fill:#1e3a5f,stroke:#4a7ab8,color:#fff;
-    classDef nexus fill:#4a3a1e,stroke:#a07a3a,color:#fff;
-    classDef gcp fill:#1e4a3a,stroke:#3a8a6a,color:#fff;
-    class Build build;
-    class Nuget,Docker nexus;
-    class GAR,GCR gcp;
+  A --> B
+  B --> C
+  B --> D
+  C --> NN[("Nexus nuget-hosted")]
+  D --> ND[("Nexus docker-hosted")]
+  B --> NS[("Nexus sboms")]
 ```
 
-### Artifact forwarding
+`FAIL_ON_SEVERITY` gates the build at `cicd-scan` (dependency CVEs) and optionally at
+`publish-nexus-docker` (image CVEs). SBOMs (`bom.json`, `vulnerabilities.json`, `bom-vex.json`)
+land in Nexus keyed by package version and become the build's durable provenance.
 
-`cicd-build` archives `build-info.json` (package version, info version, git commit, build number). Every downstream step pulls that artifact from the upstream build using the Jenkins Copy Artifact plugin's `SpecificBuildSelector` (with `SOURCE_BUILD_NUMBER`) or `StatusBuildSelector` (last successful). The orchestrator's only job is to supply the right `SOURCE_BUILD_NUMBER` to each downstream invocation — the build-info JSON itself carries everything else.
+## Event‑driven auto‑deploy
 
-### Parallelism
+The CI service has no knowledge of deployment; it only publishes facts on the bus. The deployment
+service reacts and promotes the image — automatically when a service's mapping has auto‑deploy on
+(also triggerable manually from the UI).
 
-The chain is logically a DAG (the two `nexus-*` publishes share `cicd-build` as their input), but the orchestrator runs steps sequentially in declaration order. Parallel execution would need orchestrator changes — currently a single failed step stops the chain.
+```mermaid
+sequenceDiagram
+  participant CI as jenkins-api
+  participant Bus as RabbitMQ
+  participant Dep as deployment-api
+  participant Nx as Nexus
+  participant GAR as Artifact Registry
+  participant Run as Cloud Run
+
+  CI->>Nx: reconcile — find pushed container (by version / tag)
+  CI->>Bus: ContainerPublished (ci.events)
+  Bus->>Dep: deliver
+  Dep->>Dep: upsert KnownContainer; match active service × auto mapping
+  Dep->>Nx: GarPush — crane copy (digest-preserving)
+  Nx-->>GAR: image
+  Dep->>Run: CloudRunDeploy — create / update revision
+  Run-->>GAR: pull image
+  Dep->>Bus: ServiceDeployed (deployment.events)
+  Bus->>CI: deliver
+```
+
+## Components
+
+| Component | Tech | Responsibility |
+| --- | --- | --- |
+| **web-admin** (`cicd.web.admin`) | Blazor Server + MudBlazor | UI for Jenkins, Nexus, SCA/SBOM, CI (repos + pipelines), Deployment, Cloud. Typed `HttpClient`s to the two APIs (URLs injected by Aspire service discovery). |
+| **jenkins-api** (CI service) | ASP.NET · Clean Arch · Wolverine · EF Core | Pipeline / PipelineRun aggregates; server‑side run executor drives Jenkins jobs; `JenkinsBuildSyncService` polls builds + reconciles artifacts from Nexus; raises `ContainerPublished`; CI→deployment handoff. |
+| **deployment-api** (deployment service) | ASP.NET · Clean Arch · Wolverine · EF Core | Services × Environments × Mappings (typed steps `GarPush`, `CloudRunDeploy`), container inventory, deployment runs. Consumes `ci.events`; promotes Nexus→GAR (crane) and deploys Cloud Run (Google SDK / ADC). |
+| **Jenkins controller** | Jenkins + pipeline jobs | Executes `cicd-build → cicd-scan → publish-nexus-{nuget,docker}` (Jenkinsfiles under `jenkins/`). Jobs run in a `netsdk10` build container (dotnet SDK + Trivy). |
+| **Nexus** | Sonatype Nexus 3 | `nuget-hosted`, `docker-hosted` registry (`:8082`), `sboms` raw repo. REST on `:8081`. |
+| **Messaging** | RabbitMQ + Wolverine (SQL outbox/inbox) | Fanout channels `ci.events` (CI facts) and `deployment.events` (deploy outcomes). |
+| **Data** | SQL Server (Aspire data volume) | `JenkinsCi` and `Deployment` databases. |
+| **Cloud target** | Google Artifact Registry + Cloud Run | Per‑environment GCP project/region (default `egen-gcr` / `us-west1`). Auth via ADC. |
+| **Shared contracts** | `Cicd.IntegrationEvents` | Cross‑service events: `Ci.ContainerPublished`, `Ci.PipelineCompleted/StepCompleted/Cancelled`, `Deployment.ServiceDeployed`. |
 
 ## Where things live
 
-| Concern | Project |
+| Concern | Path |
 | --- | --- |
-| Blazor UI, pages, layout | `src/web-admin/cicd.web.admin` |
-| Jenkins HTTP client | `src/jenkins/Jenkins.Client` |
-| Pipeline orchestration | `src/jenkins/Jenkins.Orchestrator` (+ `.Abstractions`) |
-| Jenkinsfiles | `jenkins/build/`, `jenkins/publish/nexus/{nuget,docker}/`, `jenkins/publish/gcp/{gar,gcr}/` |
-| Pipeline definition (which job feeds which) | `Jenkins.Orchestrator/DefaultPipelines.cs` |
+| Aspire host (orchestration) | `src/Aspire/Cicd.Aspire.Host` |
+| Blazor UI | `src/web-admin/cicd.web.admin` |
+| CI service (Clean Arch) | `src/jenkins/Jenkins.{Domain,Application,Infrastructure,Api,Client,Orchestrator}` |
+| Deployment service (Clean Arch) | `src/deployment/Deployment.{Domain,Application,Infrastructure,Api,Contracts}` |
+| Jenkinsfiles | `jenkins/{build,scan,publish/nexus/{nuget,docker},jobs}` |
+| Default pipeline chain | `Jenkins.Application/.../ListPipelines.cs` (seed) · `Jenkins.Orchestrator/DefaultPipelines.cs` |
+| Shared event contracts | `src/shared/Cicd.IntegrationEvents` |
+
+## Key principles
+
+- **Repo‑agnostic** — every Jenkins job clones the target repo itself; the platform builds any repo, not just this monorepo.
+- **Commit‑pinned** — scan/publish clone the exact `gitCommitHash` from `build-info.json`, so artifacts reflect exactly what was built.
+- **Copy‑not‑compile images** — apps are published on the agent and copied into a non‑root runtime image with a HEALTHCHECK; no SDK in the shipped image.
+- **Event‑driven & decoupled** — CI publishes facts; deployment reacts. Neither calls the other directly; reliability comes from the SQL outbox/inbox.
+- **Shift‑left security** — dependency SBOM + CVE gate in `cicd-scan`; image CVE scan at docker‑publish; SBOMs stored durably in Nexus and surfaced in the SCA/SBOM UI.
