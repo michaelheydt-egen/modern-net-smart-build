@@ -52,6 +52,8 @@ public sealed class DeploymentRunExecutor
 
         var failed = false;
         string? failReason = null;
+        StepFailureKind? failureKind = null;
+        Deployment.Domain.Mappings.DeploymentStepKind? failedStep = null;
 
         foreach (var step in steps.OrderBy(s => s.Order))
         {
@@ -64,20 +66,34 @@ public sealed class DeploymentRunExecutor
             try
             {
                 var outcome = await executor.ExecuteAsync(ctx, ct).ConfigureAwait(false);
-                run.RecordStep(step.Order, step.Kind, outcome.Success ? "Succeeded" : "Failed", outcome.Detail);
+                run.RecordStep(step.Order, step.Kind, outcome.Success ? "Succeeded" : "Failed", outcome.Detail, outcome.FailureKind);
                 if (!outcome.Success)
                 {
                     failed = true;
-                    failReason = $"step {step.Kind} failed: {outcome.Detail}";
+                    failedStep = step.Kind;
+                    failureKind = outcome.FailureKind ?? StepFailureKind.Unknown;
+                    failReason = outcome.Detail ?? "step failed.";
                     break;
                 }
             }
+            catch (DeploymentStepException ex)
+            {
+                run.RecordStep(step.Order, step.Kind, "Failed", ex.Message, ex.Kind);
+                failed = true;
+                failedStep = step.Kind;
+                failureKind = ex.Kind;
+                failReason = ex.Message;
+                logger.LogError(ex, "[deploy] Run {Run} step {Step} failed: {Category}.", run.Id, step.Kind, ex.Kind);
+                break;
+            }
             catch (Exception ex)
             {
-                run.RecordStep(step.Order, step.Kind, "Failed", ex.Message);
+                run.RecordStep(step.Order, step.Kind, "Failed", ex.Message, StepFailureKind.Unknown);
                 failed = true;
-                failReason = $"step {step.Kind} threw: {ex.Message}";
-                logger.LogError(ex, "[deploy] Run {Run} step {Kind} threw.", run.Id, step.Kind);
+                failedStep = step.Kind;
+                failureKind = StepFailureKind.Unknown;
+                failReason = ex.Message;
+                logger.LogError(ex, "[deploy] Run {Run} step {Step} threw.", run.Id, step.Kind);
                 break;
             }
         }
@@ -86,7 +102,7 @@ public sealed class DeploymentRunExecutor
         if (ctx.CloudRunRevision is { Length: > 0 }) run.SetCloudRunRevision(ctx.CloudRunRevision);
 
         var now = clock.GetUtcNow();
-        if (failed) run.Fail(failReason ?? "Deployment failed.", now);
+        if (failed) run.Fail(failReason ?? "Deployment failed.", now, failedStep?.ToString(), failureKind?.ToString());
         else run.Succeed(now);
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);

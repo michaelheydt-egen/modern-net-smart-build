@@ -86,10 +86,10 @@ public sealed class DeploymentRun : AggregateRoot<Guid>
 
     public void Start() { if (Status == DeploymentRunStatus.Pending) Status = DeploymentRunStatus.Running; }
 
-    public void RecordStep(int order, Mappings.DeploymentStepKind kind, string status, string? detail)
+    public void RecordStep(int order, Mappings.DeploymentStepKind kind, string status, string? detail, StepFailureKind? failureKind = null)
     {
         Steps = Steps.Where(s => s.Order != order)
-            .Append(new RunStepResult(order, kind, status, detail))
+            .Append(new RunStepResult(order, kind, status, detail, failureKind))
             .OrderBy(s => s.Order)
             .ToArray();
     }
@@ -108,12 +108,12 @@ public sealed class DeploymentRun : AggregateRoot<Guid>
             CloudRunRevision ?? string.Empty, completedAtUtc));
     }
 
-    public void Fail(string reason, DateTimeOffset completedAtUtc)
+    public void Fail(string reason, DateTimeOffset completedAtUtc, string? failedStep = null, string? category = null)
     {
         if (Status is DeploymentRunStatus.Succeeded or DeploymentRunStatus.Failed) return;
         Status = DeploymentRunStatus.Failed;
         FailureReason = string.IsNullOrWhiteSpace(reason) ? "Unknown error." : reason.Trim();
         CompletedAtUtc = completedAtUtc;
-        RaiseEvent(new DeploymentRunFailed(Id, ServiceId, EnvironmentId, FailureReason, completedAtUtc));
+        RaiseEvent(new DeploymentRunFailed(Id, ServiceId, EnvironmentId, FailureReason, failedStep, category, completedAtUtc));
     }
 }

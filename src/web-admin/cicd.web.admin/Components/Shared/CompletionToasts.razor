@@ -1,0 +1,76 @@
+@using Microsoft.AspNetCore.SignalR.Client
+@implements IAsyncDisposable
+@inject JenkinsApiClient Jenkins
+@inject DeploymentApiClient Deployment
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+@inject ILogger<CompletionToasts> Logger
+
+@* Headless, app-wide listener. Hosted once in MainLayout so it lives for the whole Blazor Server
+   circuit and raises a toast whenever a pipeline run or a deployment run completes — on any page. *@
+
+@code {
+    private HubConnection? _pipelineHub;
+    private HubConnection? _deployHub;
+
+    // Server broadcasts these (camelCase JSON); SignalR's protocol binds case-insensitively.
+    private sealed record RunCompletedMsg(Guid RunId, string PipelineName, string Status, string? FailureReason);
+    private sealed record DeploymentCompletedMsg(Guid RunId, string Status, string Title, string? Detail);
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        // Pipeline runs (jenkins-api). Best-effort: a hub that's down just means no toasts.
+        try
+        {
+            _pipelineHub = new HubConnectionBuilder()
+                .WithUrl(new Uri(Jenkins.BaseAddress, "hubs/pipeline-runs"))
+                .WithAutomaticReconnect()
+                .Build();
+            _pipelineHub.On<RunCompletedMsg>("RunCompleted", m => InvokeAsync(() =>
+            {
+                var text = $"Pipeline '{m.PipelineName}' {m.Status.ToLowerInvariant()}";
+                if (m.Status != "Succeeded" && m.FailureReason is { Length: > 0 } reason)
+                    text += $" — {reason}";
+                Toast(text, m.Status, "/jenkins/pipeline-runs");
+            }));
+            await _pipelineHub.StartAsync();
+        }
+        catch (Exception ex) { Logger.LogDebug(ex, "pipeline-runs hub unavailable; completion toasts disabled for this circuit."); }
+
+        // Deployment runs (deployment-api).
+        try
+        {
+            _deployHub = new HubConnectionBuilder()
+                .WithUrl(new Uri(Deployment.BaseAddress, "hubs/deployment-runs"))
+                .WithAutomaticReconnect()
+                .Build();
+            _deployHub.On<DeploymentCompletedMsg>("DeploymentCompleted", m => InvokeAsync(() =>
+                Toast(m.Detail is { Length: > 0 } d ? $"{m.Title} — {d}" : m.Title, m.Status, "/deployment/runs")));
+            await _deployHub.StartAsync();
+        }
+        catch (Exception ex) { Logger.LogDebug(ex, "deployment-runs hub unavailable; completion toasts disabled for this circuit."); }
+    }
+
+    private void Toast(string text, string status, string href)
+    {
+        var severity = status switch
+        {
+            "Succeeded" => Severity.Success,
+            "Cancelled" => Severity.Warning,
+            _ => Severity.Error,
+        };
+        Snackbar.Add(text, severity, cfg =>
+        {
+            cfg.RequireInteraction = severity == Severity.Error; // failures persist until dismissed
+            cfg.OnClick = _ => { Nav.NavigateTo(href); return Task.CompletedTask; };
+        });
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_pipelineHub is not null) await _pipelineHub.DisposeAsync();
+        if (_deployHub is not null) await _deployHub.DisposeAsync();
+    }
+}

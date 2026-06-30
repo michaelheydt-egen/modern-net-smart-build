@@ -1,4 +1,5 @@
 using Deployment.Domain.Mappings;
+using Deployment.Domain.Runs;
 
 namespace Deployment.Application.Abstractions;
 
@@ -23,10 +24,25 @@ public sealed class DeploymentContext
     public string ImageToDeploy => string.IsNullOrWhiteSpace(RemoteImageRef) ? SourceRef : RemoteImageRef!;
 }
 
-public sealed record StepOutcome(bool Success, string? Detail)
+public sealed record StepOutcome(bool Success, string? Detail, StepFailureKind? FailureKind = null)
 {
     public static StepOutcome Ok(string? detail = null) => new(true, detail);
-    public static StepOutcome Fail(string detail) => new(false, detail);
+
+    /// <summary>A step that failed up-front on a missing input defaults to <see cref="StepFailureKind.Config"/>.</summary>
+    public static StepOutcome Fail(string detail, StepFailureKind kind = StepFailureKind.Config) => new(false, detail, kind);
+}
+
+/// <summary>
+/// Thrown by a step adapter (crane promoter, Cloud Run deployer) to carry a categorized failure up to
+/// the run executor, which records the <see cref="Kind"/> on the step and folds it into the run's
+/// failure reason / completion toast. Use this instead of a bare exception when the cause is known.
+/// </summary>
+public sealed class DeploymentStepException : Exception
+{
+    public StepFailureKind Kind { get; }
+
+    public DeploymentStepException(StepFailureKind kind, string message, Exception? inner = null)
+        : base(message, inner) => Kind = kind;
 }
 
 /// <summary>One handler per <see cref="DeploymentStepKind"/>. The run executor dispatches by Kind.</summary>

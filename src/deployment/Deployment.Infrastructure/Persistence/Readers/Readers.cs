@@ -116,6 +116,6 @@ internal sealed class EfRunReader : IRunReader
         r.GcpProject, r.Region, r.CloudRunServiceName,
         (DeploymentTriggerDto)(int)r.Trigger, r.TriggeredBy, (DeploymentRunStatusDto)(int)r.Status,
         r.RemoteImageRef, r.CloudRunRevision, r.FailureReason,
-        r.Steps.Select(s => new RunStepResultDto(s.Order, s.Kind.ToString(), s.Status, s.Detail)).ToList(),
+        r.Steps.Select(s => new RunStepResultDto(s.Order, s.Kind.ToString(), s.Status, s.Detail, s.FailureKind?.ToString())).ToList(),
         r.RequestedAtUtc, r.CompletedAtUtc);
 }

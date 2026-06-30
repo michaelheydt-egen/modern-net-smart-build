@@ -146,7 +146,8 @@ public sealed class PipelineRunExecutorService : BackgroundService
     {
         settle();
         await uow.SaveChangesAsync(ct).ConfigureAwait(false); // dispatches domain events → translators → integration events
-        await _notifier.RunSettledAsync(runId, run.Status.ToString(), run.FailureReason, ct).ConfigureAwait(false);
+        await _notifier.RunSettledAsync(runId, run.Status.ToString(), run.FailureReason, ct).ConfigureAwait(false); // per-run group (live viewer)
+        await _notifier.RunCompletedAsync(runId, run.PipelineName, run.Status.ToString(), run.FailureReason, ct).ConfigureAwait(false); // all clients (app-wide toast)
         _console.Clear(runId);
     }
 

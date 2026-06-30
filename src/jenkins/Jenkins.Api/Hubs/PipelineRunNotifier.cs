@@ -30,4 +30,10 @@ internal sealed class PipelineRunNotifier : IPipelineRunNotifier
             "RunSettled",
             new { runId, status, failureReason },
             cancellationToken);
+
+    public Task RunCompletedAsync(Guid runId, string pipelineName, string status, string? failureReason, CancellationToken cancellationToken = default)
+        => _hub.Clients.All.SendAsync(
+            "RunCompleted",
+            new { runId, pipelineName, status, failureReason },
+            cancellationToken);
 }

@@ -21,6 +21,9 @@ public sealed class DeploymentApiClient
     private readonly HttpClient _http;
     public DeploymentApiClient(HttpClient http) => _http = http;
 
+    /// <summary>Base address of deployment-api — used to build the SignalR hub URL for completion toasts.</summary>
+    public Uri BaseAddress => _http.BaseAddress!;
+
     // ---- Services ----
     public async Task<IReadOnlyList<ServiceDto>> ListServicesAsync(CancellationToken ct = default)
         => await _http.GetFromJsonAsync<List<ServiceDto>>("api/deployment/services", Json, ct).ConfigureAwait(false) ?? new();

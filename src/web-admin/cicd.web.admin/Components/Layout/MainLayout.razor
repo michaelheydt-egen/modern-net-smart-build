@@ -7,6 +7,10 @@
 <MudDialogProvider />
 <MudSnackbarProvider />
 
+@* App-wide completion toasts: listens to both APIs' SignalR hubs and pops a toast when a
+   pipeline run or deployment run finishes, regardless of which page is open. *@
+<CompletionToasts />
+
 <MudLayout>
     <MudAppBar Elevation="1" Dense="true">
         <MudIconButton Icon="@Icons.Material.Filled.Menu"

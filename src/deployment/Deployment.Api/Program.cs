@@ -1,7 +1,9 @@
 using System.Text.Json.Serialization;
 using Cicd.Messaging;
 using Deployment.Api.Endpoints;
+using Deployment.Api.Hubs;
 using Deployment.Application;
+using Deployment.Application.Abstractions;
 using Deployment.Infrastructure;
 using Deployment.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -17,6 +19,10 @@ builder.Services.ConfigureHttpJsonOptions(opts => opts.SerializerOptions.Convert
 
 builder.Services.AddDeploymentApplication();
 builder.Services.AddDeploymentInfrastructure(builder.Configuration);
+
+// SignalR: broadcasts deployment-run completion to the web-admin for app-wide toasts.
+builder.Services.AddSignalR();
+builder.Services.AddSingleton<IDeploymentRunNotifier, DeploymentRunNotifier>();
 
 // Wolverine: CQRS dispatcher + in-process bus + durable cross-service messaging.
 // Handlers (the ContainerPublished consumer, the run executor, the success translator) are
@@ -41,6 +47,8 @@ builder.Host.UseWolverine(opts =>
     // re-trigger the codegen bug it exists to avoid (a mis-materialised executor collection).
     opts.CodeGeneration.AlwaysUseServiceLocationFor<Deployment.Application.Abstractions.IStepExecutorRegistry>();
     opts.CodeGeneration.AlwaysUseServiceLocationFor<Deployment.Application.Features.Runs.RequestDeploymentHandler>();
+    // The completion notifier wraps IHubContext, which the generated handler can't construct inline.
+    opts.CodeGeneration.AlwaysUseServiceLocationFor<IDeploymentRunNotifier>();
 
     opts.UseEntityFrameworkCoreTransactions();
 
@@ -81,5 +89,6 @@ app.MapServiceEndpoints();
 app.MapEnvironmentEndpoints();
 app.MapMappingEndpoints();
 app.MapRunEndpoints();
+app.MapHub<DeploymentRunHub>("/hubs/deployment-runs");
 
 app.Run();

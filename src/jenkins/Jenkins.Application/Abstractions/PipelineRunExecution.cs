@@ -19,6 +19,13 @@ public interface IPipelineRunNotifier
     Task StepChangedAsync(Guid runId, PipelineRunStepUpdate step, CancellationToken cancellationToken = default);
     Task ConsoleAppendedAsync(Guid runId, string jobName, int buildNumber, string text, CancellationToken cancellationToken = default);
     Task RunSettledAsync(Guid runId, string status, string? failureReason, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Broadcast a terminal run to <em>all</em> connected clients (not the per-run group) so the UI
+    /// can raise an app-wide completion toast regardless of which page is open. <paramref name="failureReason"/>
+    /// is non-null on a failed run so the toast can show why.
+    /// </summary>
+    Task RunCompletedAsync(Guid runId, string pipelineName, string status, string? failureReason, CancellationToken cancellationToken = default);
 }
 
 public sealed record PipelineRunStepUpdate(string JobName, string Status, int? BuildNumber, string? Reason);

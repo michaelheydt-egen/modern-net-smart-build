@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Deployment.Application.Abstractions;
+using Deployment.Domain.Runs;
 
 namespace Deployment.Infrastructure.Gcp;
 
@@ -43,7 +44,8 @@ internal sealed class CraneArtifactPromoter : IArtifactPromoter
         try { process.Start(); }
         catch (Exception ex)
         {
-            throw new InvalidOperationException($"Could not start '{exe}' for image copy (installed and on PATH?): {ex.Message}", ex);
+            throw new DeploymentStepException(StepFailureKind.ToolMissing,
+                $"Could not start '{exe}' for image copy (installed and on PATH?): {ex.Message}", ex);
         }
 
         var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
@@ -53,6 +55,29 @@ internal sealed class CraneArtifactPromoter : IArtifactPromoter
         var stderr = await stderrTask.ConfigureAwait(false);
 
         if (process.ExitCode != 0)
-            throw new InvalidOperationException($"'{exe} copy' exited {process.ExitCode}. {stderr.Trim()} {stdout.Trim()}".Trim());
+        {
+            var combined = $"{stderr.Trim()} {stdout.Trim()}".Trim();
+            var kind = LooksLikeAuthFailure(combined) ? StepFailureKind.RegistryAuth : StepFailureKind.RegistryError;
+            // Lead with the first non-empty line — crane's auth/registry errors are on the first line;
+            // the rest is usually a stack-ish dump that only clutters the toast.
+            var summary = FirstLine(combined);
+            throw new DeploymentStepException(kind, $"crane copy exited {process.ExitCode}: {summary}");
+        }
+    }
+
+    private static bool LooksLikeAuthFailure(string text) =>
+        text.Contains("unauthorized", StringComparison.OrdinalIgnoreCase)
+        || text.Contains("denied", StringComparison.OrdinalIgnoreCase)
+        || text.Contains("forbidden", StringComparison.OrdinalIgnoreCase)
+        || text.Contains("authentication", StringComparison.OrdinalIgnoreCase)
+        || text.Contains("credential", StringComparison.OrdinalIgnoreCase)
+        || text.Contains("401", StringComparison.Ordinal)
+        || text.Contains("403", StringComparison.Ordinal);
+
+    private static string FirstLine(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return "no output.";
+        var nl = text.IndexOfAny(['\r', '\n']);
+        return (nl >= 0 ? text[..nl] : text).Trim();
     }
 }

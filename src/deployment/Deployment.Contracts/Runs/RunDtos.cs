@@ -3,7 +3,7 @@ namespace Deployment.Contracts.Runs;
 public enum DeploymentRunStatusDto { Pending = 0, Running = 1, Succeeded = 2, Failed = 3 }
 public enum DeploymentTriggerDto { Manual = 0, Auto = 1 }
 
-public sealed record RunStepResultDto(int Order, string Kind, string Status, string? Detail);
+public sealed record RunStepResultDto(int Order, string Kind, string Status, string? Detail, string? FailureKind = null);
 
 public sealed record DeploymentRunDto(
     Guid Id,

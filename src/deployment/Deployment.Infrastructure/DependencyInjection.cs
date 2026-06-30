@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Deployment.Application.Abstractions;
 using Deployment.Application.Features.Containers;
 using Deployment.Application.Features.Environments;
@@ -49,7 +50,12 @@ public static class DependencyInjection
         services.AddScoped<IKnownContainerReader, EfKnownContainerReader>();
 
         // GCP adapters (ADC). Crane for Nexus→GAR, Cloud Run admin client for deploy.
-        services.AddOptions<GoogleCloudRunOptions>().Bind(configuration.GetSection(GoogleCloudRunOptions.SectionName));
+        // ValidateOnStart fails the host immediately on a missing crane / bad timeouts, instead of
+        // surfacing the misconfiguration as a late GarPush failure on the first deploy.
+        services.AddSingleton<IValidateOptions<GoogleCloudRunOptions>, GoogleCloudRunOptionsValidator>();
+        services.AddOptions<GoogleCloudRunOptions>()
+            .Bind(configuration.GetSection(GoogleCloudRunOptions.SectionName))
+            .ValidateOnStart();
         services.AddSingleton<IArtifactPromoter, CraneArtifactPromoter>();
         services.AddSingleton<ICloudRunDeployer, GoogleCloudRunDeployer>();
 
