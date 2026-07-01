@@ -167,12 +167,20 @@ pipeline {
 
                         // aspirate builds each Aspire resource image (dotnet publish -t:PublishContainer) and pushes to
                         // Nexus via the SDK's own registry client; --skip-build is NOT used (this job IS the build).
+                        //
+                        // aspirate reads ContainerSettings (Registry + Tags) from aspirate.json, and those WIN over the
+                        // `init -cr/-ct` fallbacks — so a committed aspirate.json (sample apps ship one) or a stale one
+                        // left in the reused Jenkins workspace leaks its registry/tag through (that's why the SDK saw
+                        // 'nexus:8082' and 'latest'). Clean any stale state, then pin ContainerSettings deterministically
+                        // to this build's SDK registry (SDK-recognisable host) + immutable tag.
                         sh """
                             set -e
                             export PATH="\$PATH:\$HOME/.dotnet/tools"
                             export DOTNET_CONTAINER_INSECURE_REGISTRIES=${SDK_REGISTRY}
                             cd ${APPHOST_DIR}
+                            rm -rf aspirate.json aspirate-output manifest.json
                             aspirate init -cr ${SDK_REGISTRY} -ct ${IMAGE_TAG} --disable-secrets --non-interactive
+                            printf '%s' '{"ContainerSettings":{"Registry":"${SDK_REGISTRY}","RepositoryPrefix":null,"Tags":["${IMAGE_TAG}"],"Builder":"docker","BuildArgs":null,"Context":null}}' > aspirate.json
                             aspirate generate --non-interactive --disable-secrets --include-dashboard false \\
                                 --namespace ${params.NAMESPACE} --image-pull-policy IfNotPresent --output-format kustomize
                         """
