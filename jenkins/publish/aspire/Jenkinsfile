@@ -304,6 +304,9 @@ pipeline {
                     ], pretty: 2
                     sh 'cat build-info.json'
                     archiveArtifacts artifacts: 'build-info.json', fingerprint: true, onlyIfSuccessful: true
+                    // Also archive the per-image CycloneDX SBOMs (already uploaded to Nexus) so the
+                    // web-admin SCA → Aspire SBOM view can list + render them via the Jenkins artifact API.
+                    archiveArtifacts artifacts: '_meta/image-*.json', fingerprint: true, allowEmptyArchive: true
                     currentBuild.description = "${APP_NAME} ${PACKAGE_VERSION}"
                 }
             }

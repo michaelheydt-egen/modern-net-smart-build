@@ -50,7 +50,14 @@ else if (_build is { } b)
                 {
                     <MudLink Href="@b.VulnerabilityReportUri" Target="_blank" Class="d-block">Vulnerability report</MudLink>
                 }
-                @if (string.IsNullOrEmpty(b.SbomUri) && string.IsNullOrEmpty(b.VulnerabilityReportUri))
+                @{
+                    var isAspire = string.Equals(b.Head.CiJobName, "cicd-aspire-publish", StringComparison.OrdinalIgnoreCase);
+                }
+                @if (isAspire)
+                {
+                    <MudLink Href="/sca/aspire-sbom" Class="d-block">Per-image SBOMs (SCA → Aspire SBOM) →</MudLink>
+                }
+                @if (string.IsNullOrEmpty(b.SbomUri) && string.IsNullOrEmpty(b.VulnerabilityReportUri) && !isAspire)
                 {
                     <MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-secondary);">No SBOM / vulnerability report recorded.</MudText>
                 }

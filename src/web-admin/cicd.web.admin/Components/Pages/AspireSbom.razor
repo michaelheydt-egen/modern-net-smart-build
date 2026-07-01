@@ -1,0 +1,262 @@
+@page "/sca/aspire-sbom"
+@inject IBuildStore Store
+@implements IDisposable
+
+<PageTitle>SCA — Aspire SBOM</PageTitle>
+
+<MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4">
+    <MudText Typo="Typo.h4">Aspire SBOM viewer</MudText>
+    <MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-secondary);">
+        @_jobName · per-image CycloneDX
+    </MudText>
+    <MudSpacer />
+    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh"
+               Disabled="@_buildsLoading" OnClick="RefreshBuildsAsync">Refresh</MudButton>
+</MudStack>
+
+@* ---------- Build selector ---------- *@
+<MudPaper Elevation="1" Class="pa-4 mb-4">
+    <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2">
+        <MudIcon Icon="@Icons.Material.Filled.Build" Color="Color.Primary" />
+        <MudText Typo="Typo.h6">Select build</MudText>
+        @if (_selectedBuild is { } sel)
+        {
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Style="font-family: ui-monospace, monospace;">
+                #@sel.Number @(sel.Description ?? string.Empty)
+            </MudChip>
+        }
+    </MudStack>
+
+    @if (_buildsError is { Length: > 0 })
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="my-2">@_buildsError</MudAlert>
+    }
+
+    @if (_buildsLoading && _builds is null)
+    {
+        <MudProgressLinear Indeterminate="true" />
+    }
+    else if (_builds is { Count: > 0 })
+    {
+        <MudTable Items="@_builds" Dense="true" Hover="true" Striped="true" RowsPerPage="5"
+                  OnRowClick="OnRowClickedAsync" RowClassFunc="@RowClassFunc" T="Build">
+            <HeaderContent>
+                <MudTh Style="width: 5rem;">#</MudTh>
+                <MudTh>App / version</MudTh>
+                <MudTh Style="width: 8rem;">Status</MudTh>
+                <MudTh Style="width: 11rem;">Started</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd Style="font-family: ui-monospace, monospace;">#@context.Number</MudTd>
+                <MudTd>@(context.Description ?? "—")</MudTd>
+                <MudTd>
+                    <MudChip T="string" Size="Size.Small" Color="@StatusColor(context)" Variant="Variant.Filled">@StatusLabel(context)</MudChip>
+                </MudTd>
+                <MudTd>@FormatStarted(context.Timestamp)</MudTd>
+            </RowTemplate>
+            <PagerContent>
+                <MudTablePager PageSizeOptions="new[] { 5, 10, 25, 50 }" />
+            </PagerContent>
+        </MudTable>
+    }
+    else if (!_buildsLoading && _buildsError is null)
+    {
+        <MudText Typo="Typo.body2" Class="mt-2" Style="color: var(--mud-palette-text-secondary);">
+            No @_jobName builds. Register an Aspire repo and run the pipeline.
+        </MudText>
+    }
+</MudPaper>
+
+@* ---------- Per-image SBOM selector ---------- *@
+@if (_selectedBuild is not null)
+{
+    <MudPaper Elevation="1" Class="pa-4 mb-4">
+        <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2">
+            <MudIcon Icon="@Icons.Material.Filled.Inventory2" Color="Color.Primary" />
+            <MudText Typo="Typo.h6">Image SBOMs</MudText>
+            @if (_images is { Count: > 0 })
+            {
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@_images.Count</MudChip>
+            }
+        </MudStack>
+
+        @if (_imagesLoading)
+        {
+            <MudProgressLinear Indeterminate="true" />
+        }
+        else if (_imagesError is { Length: > 0 })
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined">@_imagesError</MudAlert>
+        }
+        else if (_images is { Count: 0 })
+        {
+            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
+                No per-image SBOMs archived on this build. They're archived by <code>cicd-aspire-publish</code>
+                as <code>image-&lt;resource&gt;.json</code> — re-run the pipeline (a build after the SBOM-archive change).
+                They're also always in Nexus under <code>sboms/sbom/&lt;version&gt;/</code>.
+            </MudAlert>
+        }
+        else if (_images is not null)
+        {
+            <MudStack Row="true" Wrap="Wrap.Wrap" Spacing="2">
+                @foreach (var a in _images)
+                {
+                    var isSel = _selectedImage?.RelativePath == a.RelativePath;
+                    <MudButton Variant="@(isSel ? Variant.Filled : Variant.Outlined)"
+                               Color="Color.Primary"
+                               Size="Size.Small"
+                               StartIcon="@Icons.Material.Filled.DataObject"
+                               Disabled="@_sbomLoading"
+                               OnClick="@(() => LoadImageAsync(a))">
+                        @ResourceName(a)
+                    </MudButton>
+                }
+            </MudStack>
+        }
+    </MudPaper>
+}
+
+@if (_sbomLoading)
+{
+    <MudProgressLinear Indeterminate="true" Class="mb-4" />
+}
+else if (_sbomError is { Length: > 0 })
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-4">@_sbomError</MudAlert>
+}
+
+@* Shared analysis panels (metadata / components / vulnerabilities). No Visualize link —
+   the /sca/visualize page targets cicd-scan's bom-vex.json, not per-image SBOMs. *@
+<SbomAnalysis Sbom="_sbom" />
+
+@code {
+    private const string _jobName = "cicd-aspire-publish";
+    private const int _buildListCount = 25;
+
+    // Build picker
+    private bool _buildsLoading;
+    private string? _buildsError;
+    private IReadOnlyList<Build>? _builds;
+    private Build? _selectedBuild;
+    private CancellationTokenSource? _inflightCts;
+
+    // Image SBOM list (a build's archived image-*.json artifacts)
+    private bool _imagesLoading;
+    private string? _imagesError;
+    private IReadOnlyList<JenkinsBuildArtifact>? _images;
+    private JenkinsBuildArtifact? _selectedImage;
+
+    // Selected image's parsed SBOM
+    private bool _sbomLoading;
+    private string? _sbomError;
+    private SbomDocument? _sbom;
+
+    protected override async Task OnInitializedAsync() => await RefreshBuildsAsync();
+
+    private async Task RefreshBuildsAsync()
+    {
+        _inflightCts?.Cancel();
+        _inflightCts = new CancellationTokenSource();
+        var ct = _inflightCts.Token;
+
+        _buildsLoading = true;
+        _buildsError = null;
+        StateHasChanged();
+        try
+        {
+            _builds = await Store.ListBuildsAsync(_jobName, _buildListCount, ct);
+            if (_selectedBuild is { } prev)
+                _selectedBuild = _builds.FirstOrDefault(b => b.Number == prev.Number);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { _buildsError = ex.Message; }
+        finally { _buildsLoading = false; StateHasChanged(); }
+    }
+
+    private async Task OnRowClickedAsync(TableRowClickEventArgs<Build> args)
+    {
+        _selectedBuild = args.Item;
+        // reset downstream selections
+        _images = null; _imagesError = null; _selectedImage = null; _sbom = null; _sbomError = null;
+        await LoadImagesAsync(_selectedBuild.Number);
+    }
+
+    private async Task LoadImagesAsync(int buildNumber)
+    {
+        _imagesLoading = true; _imagesError = null; StateHasChanged();
+        try
+        {
+            var details = await Store.GetBuildAsync(_jobName, buildNumber);
+            _images = details.Artifacts
+                .Where(a => a.FileName.StartsWith("image-", StringComparison.OrdinalIgnoreCase)
+                            && a.FileName.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(a => a.FileName, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+        catch (Exception ex) { _imagesError = ex.Message; _images = null; }
+        finally { _imagesLoading = false; StateHasChanged(); }
+    }
+
+    private async Task LoadImageAsync(JenkinsBuildArtifact artifact)
+    {
+        if (_selectedBuild is not { } b) return;
+        _selectedImage = artifact;
+        _sbomLoading = true; _sbomError = null; _sbom = null; StateHasChanged();
+        try
+        {
+            var bytes = await Store.GetArtifactBytesAsync(_jobName, b.Number, artifact.RelativePath);
+            _sbom = SbomReader.Parse(bytes);
+        }
+        catch (Exception ex) { _sbomError = ex.Message; }
+        finally { _sbomLoading = false; StateHasChanged(); }
+    }
+
+    public void Dispose()
+    {
+        _inflightCts?.Cancel();
+        _inflightCts?.Dispose();
+    }
+
+    private string RowClassFunc(Build b, int rowNumber) =>
+        _selectedBuild?.Number == b.Number ? "sca-row-selected" : string.Empty;
+
+    // "image-apiservice.json" → "apiservice"
+    private static string ResourceName(JenkinsBuildArtifact a)
+    {
+        var n = a.FileName;
+        if (n.StartsWith("image-", StringComparison.OrdinalIgnoreCase)) n = n["image-".Length..];
+        if (n.EndsWith(".json", StringComparison.OrdinalIgnoreCase)) n = n[..^".json".Length];
+        return n.Length == 0 ? a.FileName : n;
+    }
+
+    private static string StatusLabel(Build b) =>
+        b.Building ? "Running" : (b.Result?.ToString() ?? "Unknown");
+
+    private static Color StatusColor(Build b)
+    {
+        if (b.Building) return Color.Info;
+        return b.Result switch
+        {
+            BuildResult.Success  => Color.Success,
+            BuildResult.Failure  => Color.Error,
+            BuildResult.Unstable => Color.Warning,
+            BuildResult.Aborted  => Color.Dark,
+            _                    => Color.Default
+        };
+    }
+
+    private static string FormatStarted(long unixMs)
+    {
+        if (unixMs <= 0) return "—";
+        var t = DateTimeOffset.FromUnixTimeMilliseconds(unixMs);
+        var ago = DateTimeOffset.UtcNow - t;
+        return ago switch
+        {
+            { TotalMinutes: < 1 } => "just now",
+            { TotalHours: < 1 }   => $"{(int)ago.TotalMinutes}m ago",
+            { TotalDays: < 1 }    => $"{(int)ago.TotalHours}h ago",
+            { TotalDays: < 30 }   => $"{(int)ago.TotalDays}d ago",
+            _                     => t.LocalDateTime.ToString("yyyy-MM-dd HH:mm")
+        };
+    }
+}

@@ -181,7 +181,10 @@ public sealed class JenkinsBuildSyncService : BackgroundService
             if (status is { } terminal)
             {
                 var versions = BuildVersionsFrom(info);
-                var quality = BuildQualityFrom(nexus, info.PackageVersion);
+                // Aspire builds publish per-image SBOMs (surfaced in the Aspire SBOM view), not a single
+                // bom-vex.json/vulnerabilities.json — so don't attach a Quality that points at files the
+                // cicd-aspire-publish job never produces (it would render as dead links on the build detail).
+                var quality = repo.BuildKind == BuildKindDto.Aspire ? null : BuildQualityFrom(nexus, info.PackageVersion);
                 var completedAt = DateTimeOffset.FromUnixTimeMilliseconds(build.Timestamp + Math.Max(0, build.Duration));
 
                 await completeBuild.HandleAsync(new CompleteBuildCommand(
