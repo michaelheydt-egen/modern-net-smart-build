@@ -123,12 +123,28 @@ pipeline {
                         def regPort = parts.length > 1 ? ":${parts[1]}" : ''
                         SDK_REGISTRY = DOCKER_REGISTRY
                         if (regHost != 'localhost' && !regHost.contains('.')) {
-                            def ip = sh(returnStdout: true, script: "getent hosts ${regHost} | awk '{print \$1; exit}'").trim()
+                            // Resolve to an IPv4 via whatever the build image provides. `getent ahostsv4` uses
+                            // getaddrinfo (hits docker's embedded DNS) where the legacy `getent hosts` path can come
+                            // back empty; fall through to python3/ping/nslookup/dig for good measure.
+                            def ip = sh(returnStdout: true, script: """
+                                NX='${regHost}'; IP=''
+                                if command -v getent >/dev/null 2>&1; then
+                                    IP=\$(getent ahostsv4 "\$NX" 2>/dev/null | awk 'NR==1{print \$1}')
+                                    [ -z "\$IP" ] && IP=\$(getent hosts "\$NX" 2>/dev/null | awk 'NR==1{print \$1}')
+                                fi
+                                [ -z "\$IP" ] && command -v python3 >/dev/null 2>&1 && IP=\$(python3 -c "import socket,sys;sys.stdout.write(socket.gethostbyname('\$NX'))" 2>/dev/null)
+                                [ -z "\$IP" ] && command -v ping    >/dev/null 2>&1 && IP=\$(ping -c1 -W1 "\$NX" 2>/dev/null | sed -n '1s/.*(\\([0-9.][0-9.]*\\)).*/\\1/p')
+                                [ -z "\$IP" ] && command -v nslookup>/dev/null 2>&1 && IP=\$(nslookup "\$NX" 2>/dev/null | awk '/^Address[: ]/{a=\$NF} END{print a}' | grep -E '^[0-9.]+\$')
+                                [ -z "\$IP" ] && command -v dig     >/dev/null 2>&1 && IP=\$(dig +short "\$NX" A 2>/dev/null | awk 'NR==1{print}')
+                                printf '%s' "\$IP"
+                            """).trim()
                             if (ip) {
                                 SDK_REGISTRY = "${ip}${regPort}"
                                 echo "SDK push registry: '${regHost}' is single-label; using resolved IP ${SDK_REGISTRY} (docker keeps using ${DOCKER_REGISTRY}; the deployer repoints the host at apply time)."
                             } else {
-                                echo "WARNING: could not resolve '${regHost}' to an IP; the .NET SDK push may fail with CONTAINER2012."
+                                // Fail loudly rather than regress to the un-recognisable single-label host (CONTAINER2012).
+                                sh(returnStatus: true, script: "echo '[resolver diag] tools:'; for t in getent python3 ping nslookup dig; do command -v \$t >/dev/null 2>&1 && echo \"  \$t: present\" || echo \"  \$t: MISSING\"; done; echo '[resolver diag] getent ahostsv4:'; getent ahostsv4 ${regHost} 2>&1 | head -3; echo '[resolver diag] getent hosts:'; getent hosts ${regHost} 2>&1 | head -3; echo '[resolver diag] /etc/resolv.conf:'; head -5 /etc/resolv.conf 2>&1")
+                                error "cicd-aspire-publish: could not resolve '${regHost}' to an IPv4 in the build container. The .NET SDK rejects a single-label registry host (CONTAINER2012 'Could not recognize registry'). Fix: set NEXUS_DOCKER_HOST to a dotted host or an IP, or add a resolver (getent/python3/iputils-ping) to '${params.BUILD_CONTAINER_IMAGE}'. See the [resolver diag] lines above."
                             }
                         }
 
