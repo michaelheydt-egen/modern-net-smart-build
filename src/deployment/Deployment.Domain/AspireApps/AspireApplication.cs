@@ -24,9 +24,17 @@ public sealed class AspireApplication : AggregateRoot<Guid>
     /// <summary>Optional version/build label for the deploy (informational; the images carry their own tags/digests).</summary>
     public string? Version { get; private set; }
 
+    /// <summary>
+    /// Explicit CI identity this app tracks — the <c>AspireAppPublished.AppName</c> emitted by the build
+    /// (derived from the <c>*.AppHost</c> project). When set, the handoff matches on this instead of
+    /// <see cref="Name"/>, so the deployment app can be renamed freely. When null, name-matching applies
+    /// (backward compatible).
+    /// </summary>
+    public string? SourceKey { get; private set; }
+
     public bool IsActive { get; private set; }
 
-    /// <summary>When true, a name-matched CI <c>AspireAppPublished</c> event auto-triggers a deployment.</summary>
+    /// <summary>When true, a CI <c>AspireAppPublished</c> event matching this app auto-triggers a deployment.</summary>
     public bool AutoDeploy { get; private set; }
 
     public DateTimeOffset CreatedAtUtc { get; private set; }
@@ -38,7 +46,7 @@ public sealed class AspireApplication : AggregateRoot<Guid>
         ManifestSource = string.Empty;
     }
 
-    public AspireApplication(Guid id, string name, string? description, Guid environmentId, string manifestSource, string? version, DateTimeOffset createdAtUtc)
+    public AspireApplication(Guid id, string name, string? description, Guid environmentId, string manifestSource, string? version, string? sourceKey, DateTimeOffset createdAtUtc)
     {
         if (id == Guid.Empty) throw new ArgumentException("Id cannot be empty.", nameof(id));
         if (environmentId == Guid.Empty) throw new ArgumentException("EnvironmentId cannot be empty.", nameof(environmentId));
@@ -48,13 +56,14 @@ public sealed class AspireApplication : AggregateRoot<Guid>
         EnvironmentId = environmentId;
         ManifestSource = Require(manifestSource, nameof(manifestSource));
         Version = Clean(version);
+        SourceKey = Clean(sourceKey);
         IsActive = true;
         CreatedAtUtc = createdAtUtc;
         UpdatedAtUtc = createdAtUtc;
         RaiseEvent(new AspireApplicationRegistered(Id, Name, createdAtUtc));
     }
 
-    public void Update(string name, string? description, Guid environmentId, string manifestSource, string? version, DateTimeOffset occurredAtUtc)
+    public void Update(string name, string? description, Guid environmentId, string manifestSource, string? version, string? sourceKey, DateTimeOffset occurredAtUtc)
     {
         if (environmentId == Guid.Empty) throw new ArgumentException("EnvironmentId cannot be empty.", nameof(environmentId));
         Name = Require(name, nameof(name));
@@ -62,6 +71,7 @@ public sealed class AspireApplication : AggregateRoot<Guid>
         EnvironmentId = environmentId;
         ManifestSource = Require(manifestSource, nameof(manifestSource));
         Version = Clean(version);
+        SourceKey = Clean(sourceKey);
         UpdatedAtUtc = occurredAtUtc;
         RaiseEvent(new AspireApplicationUpdated(Id, Name, occurredAtUtc));
     }

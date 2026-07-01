@@ -72,6 +72,15 @@ internal sealed class AspireApplicationRepository : EfRepository<AspireApplicati
     public AspireApplicationRepository(DeploymentDbContext db) : base(db) { }
     public Task<AspireApplication?> FindByNameAsync(string name, CancellationToken ct = default)
     { var n = name.Trim(); return Set.FirstOrDefaultAsync(a => a.Name == n, ct); }
+
+    // CI handoff resolution: prefer an explicit SourceKey match; fall back to name-matching for
+    // apps that haven't set one (backward compatible).
+    public async Task<AspireApplication?> FindBySourceKeyAsync(string appName, CancellationToken ct = default)
+    {
+        var key = appName.Trim();
+        return await Set.FirstOrDefaultAsync(a => a.SourceKey == key, ct).ConfigureAwait(false)
+            ?? await Set.FirstOrDefaultAsync(a => a.SourceKey == null && a.Name == key, ct).ConfigureAwait(false);
+    }
 }
 
 internal sealed class AspireApplicationRunRepository : EfRepository<AspireApplicationRun, Guid>, IAspireApplicationRunRepository

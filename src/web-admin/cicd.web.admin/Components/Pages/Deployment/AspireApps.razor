@@ -31,6 +31,7 @@
                     </MudSelect>
                 </MudItem>
                 <MudItem xs="12" md="6"><MudTextField @bind-Value="_version" Label="Version (optional)" /></MudItem>
+                <MudItem xs="12" md="6"><MudTextField @bind-Value="_sourceKey" Label="CI source key (optional)" HelperText="the AspireAppPublished app name that feeds this app; defaults to Name" /></MudItem>
                 <MudItem xs="12"><MudTextField @bind-Value="_manifestSource" Label="Manifest source (URL to the aspirate kustomize-output archive)" Required="true" HelperText="e.g. http://localhost:8081/repository/raw/myapp/1.0.0/aspirate-output.zip" /></MudItem>
                 <MudItem xs="12">
                     <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="RegisterAsync" Disabled="_busy">Register</MudButton>
@@ -49,7 +50,11 @@
         <MudTable Items="@_apps" Dense="true" Hover="true" Striped="true" T="AspireApplicationDto">
             <HeaderContent><MudTh>Name</MudTh><MudTh>Environment</MudTh><MudTh>Version</MudTh><MudTh>Manifest source</MudTh><MudTh Style="width:7rem;">Auto-deploy</MudTh><MudTh Style="width:12rem;">Actions</MudTh></HeaderContent>
             <RowTemplate>
-                <MudTd>@context.Name</MudTd>
+                <MudTd>
+                    @context.Name
+                    @if (!string.IsNullOrEmpty(context.SourceKey) && context.SourceKey != context.Name)
+                    { <MudTooltip Text="CI source key this app tracks"><MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Default" Icon="@Icons.Material.Filled.Link">@context.SourceKey</MudChip></MudTooltip> }
+                </MudTd>
                 <MudTd>@context.EnvironmentName</MudTd>
                 <MudTd Style="font-family: ui-monospace, monospace; font-size:0.85em;">@(context.Version ?? "—")</MudTd>
                 <MudTd Style="font-family: ui-monospace, monospace; font-size:0.78em; max-width:24rem; overflow:hidden; text-overflow:ellipsis;">@context.ManifestSource</MudTd>
@@ -117,7 +122,7 @@
     private bool _loading, _busy;
     private string? _error;
 
-    private string _name = "", _description = "", _manifestSource = "", _version = "";
+    private string _name = "", _description = "", _manifestSource = "", _version = "", _sourceKey = "";
     private Guid? _environmentId;
 
     private bool _logShow;
@@ -146,9 +151,9 @@
         _busy = true;
         try
         {
-            await Api.CreateAspireAppAsync(new CreateAspireApplicationRequest(_name, _description, envId, _manifestSource, string.IsNullOrWhiteSpace(_version) ? null : _version));
+            await Api.CreateAspireAppAsync(new CreateAspireApplicationRequest(_name, _description, envId, _manifestSource, string.IsNullOrWhiteSpace(_version) ? null : _version, string.IsNullOrWhiteSpace(_sourceKey) ? null : _sourceKey));
             Snackbar.Add($"Registered '{_name}'.", Severity.Success);
-            _name = _description = _manifestSource = _version = ""; _environmentId = null;
+            _name = _description = _manifestSource = _version = _sourceKey = ""; _environmentId = null;
             await LoadAsync();
         }
         catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }

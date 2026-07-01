@@ -9,10 +9,10 @@ namespace Deployment.Application.Features.AspireApps;
 internal static class AspireAppMapping
 {
     public static AspireApplicationDto ToDto(this AspireApplication a, string environmentName) =>
-        new(a.Id, a.Name, a.Description, a.EnvironmentId, environmentName, a.ManifestSource, a.Version, a.IsActive, a.AutoDeploy, a.CreatedAtUtc, a.UpdatedAtUtc);
+        new(a.Id, a.Name, a.Description, a.EnvironmentId, environmentName, a.ManifestSource, a.Version, a.SourceKey, a.IsActive, a.AutoDeploy, a.CreatedAtUtc, a.UpdatedAtUtc);
 }
 
-public sealed record CreateAspireApplicationCommand(string Name, string? Description, Guid EnvironmentId, string ManifestSource, string? Version);
+public sealed record CreateAspireApplicationCommand(string Name, string? Description, Guid EnvironmentId, string ManifestSource, string? Version, string? SourceKey = null);
 
 public sealed class CreateAspireApplicationValidator : AbstractValidator<CreateAspireApplicationCommand>
 {
@@ -22,6 +22,7 @@ public sealed class CreateAspireApplicationValidator : AbstractValidator<CreateA
         RuleFor(x => x.EnvironmentId).NotEmpty();
         RuleFor(x => x.ManifestSource).NotEmpty().MaximumLength(2000);
         RuleFor(x => x.Version).MaximumLength(200);
+        RuleFor(x => x.SourceKey).MaximumLength(200);
     }
 }
 
@@ -39,7 +40,7 @@ public sealed class CreateAspireApplicationHandler
         if (await _apps.FindByNameAsync(cmd.Name, ct).ConfigureAwait(false) is not null)
             throw new InvalidOperationException($"An Aspire application named '{cmd.Name}' already exists.");
         var env = await RequireKubernetesEnvironmentAsync(_envs, cmd.EnvironmentId, ct).ConfigureAwait(false);
-        var app = new AspireApplication(Guid.NewGuid(), cmd.Name, cmd.Description, cmd.EnvironmentId, cmd.ManifestSource, cmd.Version, _clock.GetUtcNow());
+        var app = new AspireApplication(Guid.NewGuid(), cmd.Name, cmd.Description, cmd.EnvironmentId, cmd.ManifestSource, cmd.Version, cmd.SourceKey, _clock.GetUtcNow());
         await _apps.AddAsync(app, ct).ConfigureAwait(false);
         await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
         return app.ToDto(env.Name);
@@ -55,7 +56,7 @@ public sealed class CreateAspireApplicationHandler
     }
 }
 
-public sealed record UpdateAspireApplicationCommand(Guid ApplicationId, string Name, string? Description, Guid EnvironmentId, string ManifestSource, string? Version);
+public sealed record UpdateAspireApplicationCommand(Guid ApplicationId, string Name, string? Description, Guid EnvironmentId, string ManifestSource, string? Version, string? SourceKey = null);
 
 public sealed class UpdateAspireApplicationValidator : AbstractValidator<UpdateAspireApplicationCommand>
 {
@@ -66,6 +67,7 @@ public sealed class UpdateAspireApplicationValidator : AbstractValidator<UpdateA
         RuleFor(x => x.EnvironmentId).NotEmpty();
         RuleFor(x => x.ManifestSource).NotEmpty().MaximumLength(2000);
         RuleFor(x => x.Version).MaximumLength(200);
+        RuleFor(x => x.SourceKey).MaximumLength(200);
     }
 }
 
@@ -83,7 +85,7 @@ public sealed class UpdateAspireApplicationHandler
         var app = await _apps.GetByIdAsync(cmd.ApplicationId, ct).ConfigureAwait(false)
             ?? throw new InvalidOperationException($"Aspire application {cmd.ApplicationId} not found.");
         await CreateAspireApplicationHandler.RequireKubernetesEnvironmentAsync(_envs, cmd.EnvironmentId, ct).ConfigureAwait(false);
-        app.Update(cmd.Name, cmd.Description, cmd.EnvironmentId, cmd.ManifestSource, cmd.Version, _clock.GetUtcNow());
+        app.Update(cmd.Name, cmd.Description, cmd.EnvironmentId, cmd.ManifestSource, cmd.Version, cmd.SourceKey, _clock.GetUtcNow());
         await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 }

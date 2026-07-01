@@ -8,13 +8,14 @@ public sealed record AspireApplicationDto(
     string EnvironmentName,
     string ManifestSource,
     string? Version,
+    string? SourceKey,
     bool IsActive,
     bool AutoDeploy,
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset UpdatedAtUtc);
 
-public sealed record CreateAspireApplicationRequest(string Name, string? Description, Guid EnvironmentId, string ManifestSource, string? Version);
-public sealed record UpdateAspireApplicationRequest(string Name, string? Description, Guid EnvironmentId, string ManifestSource, string? Version);
+public sealed record CreateAspireApplicationRequest(string Name, string? Description, Guid EnvironmentId, string ManifestSource, string? Version, string? SourceKey = null);
+public sealed record UpdateAspireApplicationRequest(string Name, string? Description, Guid EnvironmentId, string ManifestSource, string? Version, string? SourceKey = null);
 
 /// <summary>Trigger an Aspire-app deployment.</summary>
 public sealed record TriggerAspireDeploymentRequest(string? TriggeredBy);

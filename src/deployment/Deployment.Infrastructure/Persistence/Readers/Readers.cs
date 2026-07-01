@@ -137,7 +137,7 @@ internal sealed class EfAspireApplicationReader : IAspireApplicationReader
         from e in ej.DefaultIfEmpty()
         select new AspireApplicationDto(
             a.Id, a.Name, a.Description, a.EnvironmentId, e != null ? e.Name : "", a.ManifestSource, a.Version,
-            a.IsActive, a.AutoDeploy, a.CreatedAtUtc, a.UpdatedAtUtc);
+            a.SourceKey, a.IsActive, a.AutoDeploy, a.CreatedAtUtc, a.UpdatedAtUtc);
 
     public async Task<IReadOnlyList<AspireApplicationDto>> ListAsync(CancellationToken ct = default)
         => await Project(_db.AspireApplications.AsNoTracking().OrderBy(a => a.Name))

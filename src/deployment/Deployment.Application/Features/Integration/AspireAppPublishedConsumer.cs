@@ -7,11 +7,12 @@ namespace Deployment.Application.Features.Integration;
 
 /// <summary>
 /// Consumer edge (bus → deployment): handles <see cref="Cicd.IntegrationEvents.Ci.AspireAppPublished"/>
-/// from "ci.events". Finds the registered <see cref="AspireApplication"/> by name (== the CI app name),
-/// refreshes its <c>ManifestSource</c>/<c>Version</c> from the CI publish, and — if the app has
-/// <c>AutoDeploy</c> enabled — requests a deployment. <b>Update-only</b>: a new app must first be
-/// registered in the UI (its Kubernetes environment is a human choice), so an unmatched name is a no-op.
-/// Idempotency: Wolverine's SQL inbox + the domain's no-op on an unchanged manifest.
+/// from "ci.events". Resolves the registered <see cref="AspireApplication"/> by its explicit
+/// <c>SourceKey</c> (falling back to name-matching), refreshes its <c>ManifestSource</c>/<c>Version</c>
+/// from the CI publish, and — if the app has <c>AutoDeploy</c> enabled — requests a deployment.
+/// <b>Update-only</b>: a new app must first be registered in the UI (its Kubernetes environment is a
+/// human choice), so an unmatched publish is a no-op. Idempotency: Wolverine's SQL inbox + the domain's
+/// no-op on an unchanged manifest.
 /// </summary>
 public sealed class AspireAppPublishedConsumer
 {
@@ -24,12 +25,12 @@ public sealed class AspireAppPublishedConsumer
         ILogger<AspireAppPublishedConsumer> logger,
         CancellationToken ct)
     {
-        var app = await apps.FindByNameAsync(evt.AppName, ct).ConfigureAwait(false);
+        var app = await apps.FindBySourceKeyAsync(evt.AppName, ct).ConfigureAwait(false);
         if (app is null)
         {
             logger.LogInformation(
-                "[bus] AspireAppPublished '{App}' {Version} -> no registered Aspire application by that name; ignored " +
-                "(register it with a Kubernetes environment to enable the handoff).",
+                "[bus] AspireAppPublished '{App}' {Version} -> no registered Aspire application tracks that source; ignored " +
+                "(register one with a matching name or source key + a Kubernetes environment to enable the handoff).",
                 evt.AppName, evt.Version);
             return;
         }

@@ -16,7 +16,7 @@ public static class AspireAppsEndpoints
 
         g.MapPost("", async (CreateAspireApplicationRequest body, CreateAspireApplicationHandler h, IValidator<CreateAspireApplicationCommand> v, CancellationToken ct) =>
         {
-            var cmd = new CreateAspireApplicationCommand(body.Name, body.Description, body.EnvironmentId, body.ManifestSource, body.Version);
+            var cmd = new CreateAspireApplicationCommand(body.Name, body.Description, body.EnvironmentId, body.ManifestSource, body.Version, body.SourceKey);
             return await EndpointHelpers.ValidateAndRun(v, cmd, ct, async () =>
             {
                 var dto = await h.HandleAsync(cmd, ct);
@@ -26,7 +26,7 @@ public static class AspireAppsEndpoints
 
         g.MapPut("{id:guid}", async (Guid id, UpdateAspireApplicationRequest body, UpdateAspireApplicationHandler h, IValidator<UpdateAspireApplicationCommand> v, CancellationToken ct) =>
         {
-            var cmd = new UpdateAspireApplicationCommand(id, body.Name, body.Description, body.EnvironmentId, body.ManifestSource, body.Version);
+            var cmd = new UpdateAspireApplicationCommand(id, body.Name, body.Description, body.EnvironmentId, body.ManifestSource, body.Version, body.SourceKey);
             return await EndpointHelpers.ValidateAndRun(v, cmd, ct, async () => { await h.HandleAsync(cmd, ct); return Results.NoContent(); });
         });
 
