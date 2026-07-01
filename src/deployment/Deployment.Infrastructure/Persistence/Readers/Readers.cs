@@ -129,8 +129,10 @@ internal sealed class EfAspireApplicationReader : IAspireApplicationReader
     private readonly DeploymentDbContext _db;
     public EfAspireApplicationReader(DeploymentDbContext db) => _db = db;
 
-    private IQueryable<AspireApplicationDto> Query() =>
-        from a in _db.AspireApplications.AsNoTracking()
+    // Project from an already-filtered/ordered entity query. Ordering and filtering must be applied
+    // to the entity (a) — never the projected DTO — or SQL Server can't translate `new Dto(...).X`.
+    private IQueryable<AspireApplicationDto> Project(IQueryable<Domain.AspireApps.AspireApplication> apps) =>
+        from a in apps
         join e in _db.Environments.AsNoTracking() on a.EnvironmentId equals e.Id into ej
         from e in ej.DefaultIfEmpty()
         select new AspireApplicationDto(
@@ -138,9 +140,11 @@ internal sealed class EfAspireApplicationReader : IAspireApplicationReader
             a.IsActive, a.AutoDeploy, a.CreatedAtUtc, a.UpdatedAtUtc);
 
     public async Task<IReadOnlyList<AspireApplicationDto>> ListAsync(CancellationToken ct = default)
-        => await Query().OrderBy(a => a.Name).ToListAsync(ct).ConfigureAwait(false);
+        => await Project(_db.AspireApplications.AsNoTracking().OrderBy(a => a.Name))
+            .ToListAsync(ct).ConfigureAwait(false);
     public async Task<AspireApplicationDto?> GetByIdAsync(Guid id, CancellationToken ct = default)
-        => await Query().Where(a => a.Id == id).FirstOrDefaultAsync(ct).ConfigureAwait(false);
+        => await Project(_db.AspireApplications.AsNoTracking().Where(a => a.Id == id))
+            .FirstOrDefaultAsync(ct).ConfigureAwait(false);
 }
 
 internal sealed class EfAspireApplicationRunReader : IAspireApplicationRunReader
