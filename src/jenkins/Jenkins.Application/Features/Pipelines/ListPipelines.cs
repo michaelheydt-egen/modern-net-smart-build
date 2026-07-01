@@ -36,38 +36,58 @@ public sealed class GetPipelineByIdHandler
 }
 
 /// <summary>
-/// Seeds the default "CICD Main" pipeline (build → publish NuGet + container to
-/// Nexus) when no pipelines exist yet — preserves the previously-hardcoded chain.
-/// Called once at host startup; idempotent.
+/// Seeds the built-in pipelines at host startup (idempotent): the default "CICD Main" chain (only on
+/// a fresh database, to preserve the previously-hardcoded chain) and the "Aspire build" pipeline
+/// (whenever it's absent, so existing installs pick it up too).
 /// </summary>
 public sealed class SeedDefaultPipelineHandler
 {
+    private const string CicdMainName = "CICD Main";
+    private const string AspireName = "Aspire build";
+
     private readonly IPipelineStore _pipelines;
+    private readonly IPipelineReader _reader;
     private readonly IUnitOfWork _uow;
     private readonly TimeProvider _clock;
 
-    public SeedDefaultPipelineHandler(IPipelineStore pipelines, IUnitOfWork uow, TimeProvider clock)
+    public SeedDefaultPipelineHandler(IPipelineStore pipelines, IPipelineReader reader, IUnitOfWork uow, TimeProvider clock)
     {
         _pipelines = pipelines;
+        _reader = reader;
         _uow = uow;
         _clock = clock;
     }
 
     public async Task HandleAsync(CancellationToken cancellationToken = default)
     {
-        if (await _pipelines.AnyAsync(cancellationToken).ConfigureAwait(false)) return;
-
-        // Authoritative default chain: build → scan → publish (NuGet + container) to Nexus.
-        // Keep in sync with Jenkins.Orchestrator.DefaultPipelines.CicdMain() (documentation).
+        var existing = await _reader.ListAsync(cancellationToken).ConfigureAwait(false);
+        var names = existing.Select(p => p.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var now = _clock.GetUtcNow();
-        var pipeline = new Pipeline(Guid.NewGuid(), "CICD Main",
-            "Build, scan (SBOM + vulnerabilities), then publish the NuGet package and container image to Nexus.", now);
-        pipeline.AddStage(Guid.NewGuid(), "cicd-build", null, null, now);
-        pipeline.AddStage(Guid.NewGuid(), "cicd-scan", "cicd-build", null, now);
-        pipeline.AddStage(Guid.NewGuid(), "cicd-publish-nexus-nuget", "cicd-scan", null, now);
-        pipeline.AddStage(Guid.NewGuid(), "cicd-publish-nexus-docker", "cicd-scan", null, now);
+        var added = 0;
 
-        await _pipelines.AddAsync(pipeline, cancellationToken).ConfigureAwait(false);
-        await _uow.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        // Default chain — only on a fresh DB (keep in sync with DefaultPipelines.CicdMain()).
+        if (existing.Count == 0)
+        {
+            var main = new Pipeline(Guid.NewGuid(), CicdMainName,
+                "Build, scan (SBOM + vulnerabilities), then publish the NuGet package and container image to Nexus.", now);
+            main.AddStage(Guid.NewGuid(), "cicd-build", null, null, now);
+            main.AddStage(Guid.NewGuid(), "cicd-scan", "cicd-build", null, now);
+            main.AddStage(Guid.NewGuid(), "cicd-publish-nexus-nuget", "cicd-scan", null, now);
+            main.AddStage(Guid.NewGuid(), "cicd-publish-nexus-docker", "cicd-scan", null, now);
+            await _pipelines.AddAsync(main, cancellationToken).ConfigureAwait(false);
+            added++;
+        }
+
+        // Aspire build — ensure it exists (keep in sync with DefaultPipelines.CicdAspire()).
+        if (!names.Contains(AspireName))
+        {
+            var aspire = new Pipeline(Guid.NewGuid(), AspireName,
+                "Build a .NET Aspire app with Aspir8 and publish its images + Kustomize manifest artifact to Nexus.", now);
+            aspire.AddStage(Guid.NewGuid(), "cicd-aspire-publish", null, null, now);
+            await _pipelines.AddAsync(aspire, cancellationToken).ConfigureAwait(false);
+            added++;
+        }
+
+        if (added > 0) await _uow.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
     }
 }

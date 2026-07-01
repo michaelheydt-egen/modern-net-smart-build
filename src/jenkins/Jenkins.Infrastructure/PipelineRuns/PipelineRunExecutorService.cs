@@ -202,6 +202,8 @@ public sealed class PipelineRunExecutorService : BackgroundService
                 // mirrored from the orchestrator UI's EffectiveSteps).
                 pars["GIT_URL"] = repo.GitUrl;
                 pars["GIT_BRANCH"] = repo.DefaultBranch;
+                if (!string.IsNullOrWhiteSpace(repo.BaseVersion))
+                    pars["BASE_VER"] = repo.BaseVersion; // versioning base for the build job
             }
             foreach (var kv in stage.Parameters) pars[kv.Key] = kv.Value; // explicit stage params win
             steps.Add(new PipelineStep(
