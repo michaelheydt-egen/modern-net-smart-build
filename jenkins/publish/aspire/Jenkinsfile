@@ -146,24 +146,30 @@ pipeline {
                                 --namespace ${params.NAMESPACE} --image-pull-policy IfNotPresent --output-format kustomize
                         """
 
-                        // The images aspirate just pushed (one per Aspire resource), tagged IMAGE_TAG. Captured at
-                        // script scope for the Scan + SBOM stage.
-                        def refs = sh(script: "grep -rhoE 'image: *\\S+' ${APPHOST_DIR}/aspirate-output | awk '{print \$2}' | sort -u", returnStdout: true).trim()
-                        IMAGE_REFS = refs ? refs.readLines() : []
-
-                        // Add the floating + per-build + per-commit tags for parity with cicd-publish-nexus-docker.
-                        IMAGE_REFS.each { ref ->
+                        // aspirate tags each project image 'latest' — the .NET Aspire 9.1 manifest bakes a
+                        // per-resource tag, which has top precedence in aspir8 (ContainerDetailsService.HandleTags
+                        // returns early when the manifest tag is set), so `aspirate init -ct` is silently ignored.
+                        // Parse the pushed refs, then repoint everything to the immutable build#+commit tag: push it
+                        // (plus floating/per-build/per-commit tags for parity with cicd-publish-nexus-docker) and
+                        // rewrite the generated Kustomize manifests to it, so the archive and the deployer's
+                        // digest-pin are deterministic rather than racing a moving 'latest'.
+                        def parsedRefs = sh(script: "grep -rhoE 'image: *\\S+' ${APPHOST_DIR}/aspirate-output | awk '{print \$2}' | sort -u", returnStdout: true).trim()
+                        IMAGE_REFS = []
+                        (parsedRefs ? parsedRefs.readLines() : []).each { ref ->
                             def repoRef = ref.replaceFirst(/:[^\\/:]+\$/, '')   // strip :tag
                             sh """
                                 set -e
                                 docker pull ${ref}
-                                for t in latest ci-${env.BUILD_NUMBER} ${GIT_COMMIT_SHORT}; do
+                                for t in ${IMAGE_TAG} latest ci-${env.BUILD_NUMBER} ${GIT_COMMIT_SHORT}; do
                                     docker tag ${ref} ${repoRef}:\$t
                                     docker push ${repoRef}:\$t
                                 done
+                                # Repoint the generated manifests from aspirate's tag to the immutable build tag.
+                                grep -rlZ -- "${ref}" ${APPHOST_DIR}/aspirate-output | xargs -0 -r sed -i "s#${ref}#${repoRef}:${IMAGE_TAG}#g"
                             """
+                            IMAGE_REFS << "${repoRef}:${IMAGE_TAG}"
                         }
-                        if (IMAGE_REFS) println "Tagged ${IMAGE_REFS.size()} image(s) with: ${IMAGE_TAG}, latest, ci-${env.BUILD_NUMBER}, ${GIT_COMMIT_SHORT}"
+                        if (IMAGE_REFS) println "Tagged ${IMAGE_REFS.size()} image(s) with: ${IMAGE_TAG}, latest, ci-${env.BUILD_NUMBER}, ${GIT_COMMIT_SHORT}; manifests pinned to ${IMAGE_TAG}"
                     }
                 }
             }
