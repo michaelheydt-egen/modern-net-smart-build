@@ -106,9 +106,30 @@ pipeline {
             steps {
                 withCredentials([usernamePassword(credentialsId: "${params.NEXUS_DOCKER_CREDENTIAL_ID}", usernameVariable: 'NEXUS_DOCKER_USER', passwordVariable: 'NEXUS_DOCKER_PASS')]) {
                     script {
+                        // The .NET SDK container tooling (aspirate's PublishContainer) only recognizes a registry
+                        // whose host is multi-label (contains a dot), 'localhost', or an IP — a single-label service
+                        // name like 'nexus' is rejected with CONTAINER2012 ("Could not recognize registry"). Docker
+                        // itself is fine with it (login/pull/push), and the deployment service repoints the registry
+                        // host at apply time, so the CI push host is purely internal. Resolve a single-label host to
+                        // its IP (same Nexus endpoint) so the SDK accepts it.
+                        def hostPort = params.NEXUS_DOCKER_HOST.trim()
+                        def parts    = hostPort.split(':', 2)
+                        def regHost  = parts[0]
+                        def regPort  = parts.length > 1 ? ":${parts[1]}" : ''
+                        BUILD_REGISTRY = hostPort
+                        if (regHost != 'localhost' && !regHost.contains('.')) {
+                            def ip = sh(returnStdout: true, script: "getent hosts ${regHost} | awk '{print \$1; exit}'").trim()
+                            if (ip) {
+                                BUILD_REGISTRY = "${ip}${regPort}"
+                                echo "SDK registry: '${regHost}' is single-label; pushing via resolved IP ${BUILD_REGISTRY} (the deployment service repoints the host at apply time)."
+                            } else {
+                                echo "WARNING: could not resolve '${regHost}' to an IP; using '${hostPort}' as-is (the .NET SDK may reject it with CONTAINER2012)."
+                            }
+                        }
+
                         sh """
                             set -e
-                            echo "\$NEXUS_DOCKER_PASS" | docker login ${params.NEXUS_DOCKER_PROTOCOL}${params.NEXUS_DOCKER_HOST} -u "\$NEXUS_DOCKER_USER" --password-stdin
+                            echo "\$NEXUS_DOCKER_PASS" | docker login ${params.NEXUS_DOCKER_PROTOCOL}${BUILD_REGISTRY} -u "\$NEXUS_DOCKER_USER" --password-stdin
                         """
                         NEXUS_DOCKER_AUTHENTICATED = true
 
@@ -118,9 +139,9 @@ pipeline {
                         sh """
                             set -e
                             export PATH="\$PATH:\$HOME/.dotnet/tools"
-                            export DOTNET_CONTAINER_INSECURE_REGISTRIES=${params.NEXUS_DOCKER_HOST}
+                            export DOTNET_CONTAINER_INSECURE_REGISTRIES=${BUILD_REGISTRY}
                             cd ${APPHOST_DIR}
-                            aspirate init -cr ${params.NEXUS_DOCKER_HOST} -ct ${IMAGE_TAG} --disable-secrets --non-interactive
+                            aspirate init -cr ${BUILD_REGISTRY} -ct ${IMAGE_TAG} --disable-secrets --non-interactive
                             aspirate generate --non-interactive --disable-secrets --include-dashboard false \\
                                 --namespace ${params.NAMESPACE} --image-pull-policy IfNotPresent --output-format kustomize
                         """
@@ -238,7 +259,7 @@ pipeline {
     post {
         always {
             script {
-                if (NEXUS_DOCKER_AUTHENTICATED) { sh "docker logout ${params.NEXUS_DOCKER_PROTOCOL}${params.NEXUS_DOCKER_HOST} || true" }
+                if (NEXUS_DOCKER_AUTHENTICATED) { sh "docker logout ${params.NEXUS_DOCKER_PROTOCOL}${BUILD_REGISTRY} || true" }
             }
         }
         success { echo "Published Aspire app '${APP_NAME}' ${PACKAGE_VERSION}: images @ ${IMAGE_TAG} + manifest ${MANIFEST_URL}" }
