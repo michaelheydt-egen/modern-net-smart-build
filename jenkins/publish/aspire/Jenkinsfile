@@ -266,16 +266,18 @@ pipeline {
             steps {
                 withCredentials([usernamePassword(credentialsId: "${params.NEXUS_RAW_CREDENTIAL_ID}", usernameVariable: 'NEXUS_RAW_USER', passwordVariable: 'NEXUS_RAW_PASS')]) {
                     script {
+                        // Package with tar+gzip (always present in the build image; `zip` is not). The deployment
+                        // service sniffs magic bytes and extracts .tar.gz (gzip) as well as .zip, so a tarball is a
+                        // drop-in for the manifest source.
                         def base = params.NEXUS_RAW_REPO_URL.trim().replaceFirst(/\\/\$/, '')
-                        MANIFEST_URL = "${base}/${APP_NAME}/${PACKAGE_VERSION}/aspirate-output.zip"
+                        MANIFEST_URL = "${base}/${APP_NAME}/${PACKAGE_VERSION}/aspirate-output.tar.gz"
                         sh """
                             set -e
                             cd ${APPHOST_DIR}
-                            rm -f aspirate-output.zip
-                            if command -v zip >/dev/null 2>&1; then zip -qr aspirate-output.zip aspirate-output
-                            else (cd aspirate-output && find . -type f | zip -q ../aspirate-output.zip -@); fi
+                            rm -f aspirate-output.tar.gz
+                            tar -czf aspirate-output.tar.gz aspirate-output
                             echo "PUT ${MANIFEST_URL}"
-                            curl -fsS --user "\$NEXUS_RAW_USER:\$NEXUS_RAW_PASS" --upload-file aspirate-output.zip "${MANIFEST_URL}"
+                            curl -fsS --user "\$NEXUS_RAW_USER:\$NEXUS_RAW_PASS" --upload-file aspirate-output.tar.gz "${MANIFEST_URL}"
                         """
                         println "Manifest source (register in Deployment -> Aspire apps): ${MANIFEST_URL}"
                     }

@@ -4,7 +4,7 @@ The Aspir8 counterpart of `cicd-build` + `cicd-publish-nexus-docker`, in one job
 app repo it: builds + pushes a container image for **every** Aspire resource to the Nexus docker
 registry (tagged `:{build#}-{commit}`, plus `:latest`, `:ci-{build#}`, `:{commit}`), runs
 `aspirate generate` to produce the **Kustomize output**, and uploads that as
-`aspirate-output.zip` to the Nexus **raw** repo. The printed manifest-source URL is what you register
+`aspirate-output.tar.gz` to the Nexus **raw** repo. The printed manifest-source URL is what you register
 in web-admin → **Deployment → Aspire apps**.
 
 ## One-time Jenkins setup
