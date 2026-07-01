@@ -1,6 +1,7 @@
 using FluentValidation;
 using Deployment.Contracts.Catalog;
 using Deployment.Domain.Abstractions;
+using Deployment.Domain.AspireApps;
 using Deployment.Domain.Environments;
 using Deployment.Domain.Mappings;
 
@@ -100,9 +101,10 @@ public sealed class DeleteEnvironmentHandler
 {
     private readonly IEnvironmentRepository _envs;
     private readonly IDeploymentMappingRepository _mappings;
+    private readonly IAspireApplicationRepository _aspireApps;
     private readonly IUnitOfWork _uow;
-    public DeleteEnvironmentHandler(IEnvironmentRepository envs, IDeploymentMappingRepository mappings, IUnitOfWork uow)
-    { _envs = envs; _mappings = mappings; _uow = uow; }
+    public DeleteEnvironmentHandler(IEnvironmentRepository envs, IDeploymentMappingRepository mappings, IAspireApplicationRepository aspireApps, IUnitOfWork uow)
+    { _envs = envs; _mappings = mappings; _aspireApps = aspireApps; _uow = uow; }
 
     public async Task HandleAsync(DeleteEnvironmentCommand cmd, CancellationToken ct = default)
     {
@@ -111,6 +113,13 @@ public sealed class DeleteEnvironmentHandler
         var maps = await _mappings.ListByEnvironmentAsync(env.Id, ct).ConfigureAwait(false);
         if (maps.Count > 0)
             throw new InvalidOperationException($"Environment '{env.Name}' is referenced by {maps.Count} mapping(s); remove them first.");
+        // Guard the Aspire-app reference too — otherwise deleting leaves the app with a dangling
+        // EnvironmentId and its deploy fails with 'environment-not-found'.
+        var apps = await _aspireApps.ListByEnvironmentAsync(env.Id, ct).ConfigureAwait(false);
+        if (apps.Count > 0)
+            throw new InvalidOperationException(
+                $"Environment '{env.Name}' is referenced by {apps.Count} Aspire application(s) " +
+                $"({string.Join(", ", apps.Take(5).Select(a => a.Name))}); reassign or remove them first.");
         _envs.Remove(env);
         await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
     }

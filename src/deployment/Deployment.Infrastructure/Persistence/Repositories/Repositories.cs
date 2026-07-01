@@ -81,6 +81,9 @@ internal sealed class AspireApplicationRepository : EfRepository<AspireApplicati
         return await Set.FirstOrDefaultAsync(a => a.SourceKey == key, ct).ConfigureAwait(false)
             ?? await Set.FirstOrDefaultAsync(a => a.SourceKey == null && a.Name == key, ct).ConfigureAwait(false);
     }
+
+    public async Task<IReadOnlyList<AspireApplication>> ListByEnvironmentAsync(Guid environmentId, CancellationToken ct = default)
+        => await Set.Where(a => a.EnvironmentId == environmentId).ToListAsync(ct).ConfigureAwait(false);
 }
 
 internal sealed class AspireApplicationRunRepository : EfRepository<AspireApplicationRun, Guid>, IAspireApplicationRunRepository

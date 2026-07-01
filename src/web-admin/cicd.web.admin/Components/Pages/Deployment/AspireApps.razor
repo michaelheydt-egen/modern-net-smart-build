@@ -66,6 +66,7 @@
                 </MudTd>
                 <MudTd>
                     <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.RocketLaunch" OnClick="@(() => DeployAsync(context))" Disabled="_busy">Deploy</MudButton>
+                    <MudTooltip Text="Edit (name, environment, manifest source, …)"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Edit" OnClick="@(() => OpenEdit(context))" /></MudTooltip>
                     <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Delete" Color="Color.Error" OnClick="@(() => DeleteAsync(context))" />
                 </MudTd>
             </RowTemplate>
@@ -95,6 +96,33 @@
         </MudTable>
     }
 </MudPaper>
+
+<MudDialog @bind-Visible="_editShow" Options="_editDlg">
+    <TitleContent>Edit @_editName</TitleContent>
+    <DialogContent>
+        @if (_k8sEnvs is { Count: 0 })
+        {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">No Kubernetes environments exist — add one under Environments (Kube context + namespace) before you can point this app at one.</MudAlert>
+        }
+        <MudGrid>
+            <MudItem xs="12" md="6"><MudTextField @bind-Value="_editName" Label="Name" Required="true" /></MudItem>
+            <MudItem xs="12" md="6"><MudTextField @bind-Value="_editDescription" Label="Description (optional)" /></MudItem>
+            <MudItem xs="12" md="6">
+                <MudSelect T="Guid?" @bind-Value="_editEnvironmentId" Label="Environment (Kubernetes target)" Required="true">
+                    @foreach (var e in _k8sEnvs ?? new List<EnvironmentDto>())
+                    { <MudSelectItem T="Guid?" Value="@e.Id">@e.Name (@e.KubernetesContext/@e.KubernetesNamespace)</MudSelectItem> }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" md="6"><MudTextField @bind-Value="_editVersion" Label="Version (optional)" /></MudItem>
+            <MudItem xs="12" md="6"><MudTextField @bind-Value="_editSourceKey" Label="CI source key (optional)" HelperText="AspireAppPublished app name that feeds this app; defaults to Name" /></MudItem>
+            <MudItem xs="12"><MudTextField @bind-Value="_editManifestSource" Label="Manifest source (URL to the aspirate kustomize-output archive)" Required="true" /></MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _editShow = false)">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveEditAsync" Disabled="_busy">Save</MudButton>
+    </DialogActions>
+</MudDialog>
 
 <MudDialog @bind-Visible="_logShow" Options="_logDlg">
     <TitleContent>@(_logRun is null ? "Run" : $"{_logRun.ApplicationName} — {_logRun.Status}")</TitleContent>
@@ -128,6 +156,12 @@
     private bool _logShow;
     private AspireApplicationRunDto? _logRun;
     private static readonly DialogOptions _logDlg = new() { MaxWidth = MaxWidth.Large, FullWidth = true };
+
+    private bool _editShow;
+    private static readonly DialogOptions _editDlg = new() { MaxWidth = MaxWidth.Medium, FullWidth = true };
+    private Guid _editId;
+    private string _editName = "", _editDescription = "", _editManifestSource = "", _editVersion = "", _editSourceKey = "";
+    private Guid? _editEnvironmentId;
 
     protected override Task OnInitializedAsync() => LoadAsync();
 
@@ -178,6 +212,36 @@
     {
         try { await Api.DeleteAspireAppAsync(app.Id); await LoadAsync(); }
         catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+
+    private void OpenEdit(AspireApplicationDto app)
+    {
+        _editId = app.Id;
+        _editName = app.Name;
+        _editDescription = app.Description ?? "";
+        _editEnvironmentId = app.EnvironmentId;   // if the env is missing/dangling it won't match a list item → user re-picks
+        _editManifestSource = app.ManifestSource;
+        _editVersion = app.Version ?? "";
+        _editSourceKey = app.SourceKey ?? "";
+        _editShow = true;
+    }
+
+    private async Task SaveEditAsync()
+    {
+        if (_editEnvironmentId is not { } envId) { Snackbar.Add("Pick an environment.", Severity.Warning); return; }
+        _busy = true;
+        try
+        {
+            await Api.UpdateAspireAppAsync(_editId, new UpdateAspireApplicationRequest(
+                _editName, string.IsNullOrWhiteSpace(_editDescription) ? null : _editDescription, envId, _editManifestSource,
+                string.IsNullOrWhiteSpace(_editVersion) ? null : _editVersion,
+                string.IsNullOrWhiteSpace(_editSourceKey) ? null : _editSourceKey));
+            Snackbar.Add($"Updated '{_editName}'.", Severity.Success);
+            _editShow = false;
+            await LoadAsync();
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        finally { _busy = false; }
     }
 
     private async Task ToggleAutoDeployAsync(AspireApplicationDto app, bool value)
