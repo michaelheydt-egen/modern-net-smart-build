@@ -9,7 +9,7 @@ namespace Deployment.Application.Features.AspireApps;
 internal static class AspireAppMapping
 {
     public static AspireApplicationDto ToDto(this AspireApplication a, string environmentName) =>
-        new(a.Id, a.Name, a.Description, a.EnvironmentId, environmentName, a.ManifestSource, a.Version, a.IsActive, a.CreatedAtUtc, a.UpdatedAtUtc);
+        new(a.Id, a.Name, a.Description, a.EnvironmentId, environmentName, a.ManifestSource, a.Version, a.IsActive, a.AutoDeploy, a.CreatedAtUtc, a.UpdatedAtUtc);
 }
 
 public sealed record CreateAspireApplicationCommand(string Name, string? Description, Guid EnvironmentId, string ManifestSource, string? Version);
@@ -84,6 +84,25 @@ public sealed class UpdateAspireApplicationHandler
             ?? throw new InvalidOperationException($"Aspire application {cmd.ApplicationId} not found.");
         await CreateAspireApplicationHandler.RequireKubernetesEnvironmentAsync(_envs, cmd.EnvironmentId, ct).ConfigureAwait(false);
         app.Update(cmd.Name, cmd.Description, cmd.EnvironmentId, cmd.ManifestSource, cmd.Version, _clock.GetUtcNow());
+        await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+}
+
+public sealed record SetAspireAutoDeployCommand(Guid ApplicationId, bool AutoDeploy);
+
+public sealed class SetAspireAutoDeployHandler
+{
+    private readonly IAspireApplicationRepository _apps;
+    private readonly IUnitOfWork _uow;
+    private readonly TimeProvider _clock;
+    public SetAspireAutoDeployHandler(IAspireApplicationRepository apps, IUnitOfWork uow, TimeProvider clock)
+    { _apps = apps; _uow = uow; _clock = clock; }
+
+    public async Task HandleAsync(SetAspireAutoDeployCommand cmd, CancellationToken ct = default)
+    {
+        var app = await _apps.GetByIdAsync(cmd.ApplicationId, ct).ConfigureAwait(false)
+            ?? throw new InvalidOperationException($"Aspire application {cmd.ApplicationId} not found.");
+        app.SetAutoDeploy(cmd.AutoDeploy, _clock.GetUtcNow());
         await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 }

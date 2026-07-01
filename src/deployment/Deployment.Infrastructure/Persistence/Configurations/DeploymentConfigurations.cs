@@ -172,6 +172,7 @@ public sealed class AspireApplicationConfiguration : IEntityTypeConfiguration<As
         b.Property(a => a.ManifestSource).HasMaxLength(2000).IsRequired();
         b.Property(a => a.Version).HasMaxLength(200);
         b.Property(a => a.IsActive).IsRequired();
+        b.Property(a => a.AutoDeploy).IsRequired().HasDefaultValue(false);
         b.Property(a => a.CreatedAtUtc).IsRequired();
         b.Property(a => a.UpdatedAtUtc).IsRequired();
         b.HasIndex(a => a.Name).IsUnique();

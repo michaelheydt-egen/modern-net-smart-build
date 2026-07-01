@@ -9,6 +9,7 @@ public sealed record AspireApplicationDto(
     string ManifestSource,
     string? Version,
     bool IsActive,
+    bool AutoDeploy,
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset UpdatedAtUtc);
 
@@ -17,6 +18,9 @@ public sealed record UpdateAspireApplicationRequest(string Name, string? Descrip
 
 /// <summary>Trigger an Aspire-app deployment.</summary>
 public sealed record TriggerAspireDeploymentRequest(string? TriggeredBy);
+
+/// <summary>Toggle whether a CI publish of this app auto-triggers a deployment.</summary>
+public sealed record SetAspireAutoDeployRequest(bool AutoDeploy);
 
 public enum AspireRunStatusDto { Pending = 0, Running = 1, Succeeded = 2, Failed = 3 }
 

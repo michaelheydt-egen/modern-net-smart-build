@@ -53,6 +53,11 @@ builder.Host.UseWolverine(opts =>
     // constraint as above, or the AspireApplicationRunRequested handler leaves runs stuck Pending.
     opts.CodeGeneration.AlwaysUseServiceLocationFor<Deployment.Domain.AspireApps.Runs.IAspireApplicationRunRepository>();
     opts.CodeGeneration.AlwaysUseServiceLocationFor<IAspirateRunner>();
+    // AspireAppPublished consumer (CI→deploy handoff): the repository is an internal Infrastructure type
+    // and the directly-invoked deploy handler transitively news up more of them — service-locate both so
+    // the handler compiles (same constraint as the ContainerPublished consumer above).
+    opts.CodeGeneration.AlwaysUseServiceLocationFor<Deployment.Domain.AspireApps.IAspireApplicationRepository>();
+    opts.CodeGeneration.AlwaysUseServiceLocationFor<Deployment.Application.Features.AspireApps.RequestAspireDeploymentHandler>();
 
     opts.UseEntityFrameworkCoreTransactions();
 

@@ -20,4 +20,15 @@ public static class DefaultPipelines
         new PipelineStep("cicd-publish-nexus-nuget",  UpstreamJob: "cicd-scan"),
         new PipelineStep("cicd-publish-nexus-docker", UpstreamJob: "cicd-scan"),
     };
+
+    /// <summary>
+    /// Build a .NET Aspire app with Aspir8 and publish its artifacts to Nexus: container images for
+    /// every Aspire resource (tagged build# + commit hash) + the Kustomize-output archive that the
+    /// deployment service fetches. Single source-stage job (<c>cicd-aspire-publish</c>, jenkins/publish/aspire) —
+    /// aspirate owns the multi-container build/push, so there is no separate build/scan/publish chain.
+    /// </summary>
+    public static IReadOnlyList<PipelineStep> CicdAspire() => new[]
+    {
+        new PipelineStep("cicd-aspire-publish"),
+    };
 }

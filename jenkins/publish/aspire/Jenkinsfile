@@ -1,0 +1,245 @@
+// cicd-aspire-publish — build a .NET Aspire app with Aspir8 and publish its artifacts to Nexus:
+//   * container images for every Aspire resource, tagged with build# + commit hash
+//   * the aspirate Kustomize-output archive (the manifest source the deployment service fetches)
+//
+// Repo-agnostic: the platform injects GIT_URL + GIT_BRANCH (+ BASE_VER) for this source stage.
+// This is the Aspire counterpart of cicd-build + cicd-publish-nexus-docker in one job — Aspir8
+// owns the multi-container build/push, so there is no separate copy-only-Dockerfile step.
+def NEXUS_DOCKER_AUTHENTICATED = false
+
+pipeline {
+    parameters {
+        string(name: 'GIT_URL', defaultValue: '', description: 'Git repository of the Aspire app to build (injected from the repository).')
+        string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Branch/tag/ref to build.')
+        string(name: 'GIT_CREDENTIALS_ID', defaultValue: '', description: 'Jenkins credentials id for cloning a private repo (blank = public).')
+        string(name: 'APPHOST_PROJECT', defaultValue: '', description: 'Path (within the repo) to the Aspire AppHost dir or .csproj. Blank = auto-discover the single *.AppHost.csproj.')
+        string(name: 'BASE_VER', defaultValue: '1.0.0', description: 'Base version (Major.Minor.Patch); build# + commit hash are appended.')
+        string(name: 'APP_NAME', defaultValue: '', description: 'Artifact name segment for the manifest archive. Blank = the AppHost project name, lowercased.')
+        string(name: 'NAMESPACE', defaultValue: 'default', description: 'Kubernetes namespace baked into the generated manifests.')
+
+        string(name: 'BUILD_CONTAINER_IMAGE', defaultValue: 'netsdk10:latest', description: 'Image for the build container.')
+        string(name: 'BUILD_CONTAINER_ARGS', defaultValue: '-v /tmp/nuget:/tmp/nuget -e DOTNET_CLI_TELEMETRY_OPTOUT=1 --net=cicd-net -u root -v /var/run/docker.sock:/var/run/docker.sock --group-add 0', description: 'Arguments for the build container (docker socket for image build/push).')
+        string(name: 'ASPIRATE_PACKAGE_VERSION', defaultValue: '', description: 'Pin the Aspirate global tool version (blank = latest).')
+
+        string(name: 'NEXUS_DOCKER_HOST', defaultValue: 'nexus:8082', description: 'Nexus docker registry host:port images are pushed to.')
+        string(name: 'NEXUS_DOCKER_PROTOCOL', defaultValue: 'http://', description: 'Nexus docker registry protocol.')
+        string(name: 'NEXUS_DOCKER_CREDENTIAL_ID', defaultValue: 'rhythm-docker', description: 'Jenkins username/password credential id for the Nexus docker registry.')
+
+        string(name: 'NEXUS_RAW_REPO_URL', defaultValue: 'http://nexus:8081/repository/raw-hosted/', description: 'Nexus raw (hosted) repo base URL for the Kustomize-output archive.')
+        string(name: 'NEXUS_RAW_CREDENTIAL_ID', defaultValue: 'nexus-sbom', description: 'Jenkins username/password credential id for the Nexus REST API (raw upload).')
+
+        string(name: 'TRIVY_VERSION', defaultValue: 'v0.55.0', description: 'Trivy release tag used to scan the built images (fallback download if not baked into the build image).')
+        choice(name: 'FAIL_ON_SEVERITY', choices: ['none', 'high', 'critical'], description: 'Fail the publish when a built image has OS/library vulnerabilities at this severity (or worse). Default: report only.')
+        string(name: 'SBOM_NEXUS_REPO_URL', defaultValue: 'http://nexus:8081/repository/sboms/', description: 'Nexus raw (hosted) repo URL where per-image scan reports are uploaded.')
+        string(name: 'SBOM_NEXUS_CREDENTIAL_ID', defaultValue: 'nexus-sbom', description: 'Jenkins username/password credential id for the Nexus REST API (SBOM upload).')
+    }
+
+    options {
+        timestamps()
+        timeout(time: 30, unit: 'MINUTES')
+        disableConcurrentBuilds()
+        skipDefaultCheckout(true)  // we clone GIT_URL ourselves
+    }
+
+    agent {
+        docker {
+            image "${params.BUILD_CONTAINER_IMAGE}"
+            args "${params.BUILD_CONTAINER_ARGS}"
+            reuseNode true
+        }
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                script {
+                    if (!params.GIT_URL?.trim()) { error 'GIT_URL is required (injected from the repository).' }
+                    def remote = [url: params.GIT_URL.trim()]
+                    if (params.GIT_CREDENTIALS_ID?.trim()) { remote.credentialsId = params.GIT_CREDENTIALS_ID.trim() }
+                    println "Cloning ${params.GIT_URL} @ ${params.GIT_BRANCH}"
+                    checkout([$class: 'GitSCM', branches: [[name: params.GIT_BRANCH]], userRemoteConfigs: [remote]])
+                    sh "git config --global --add safe.directory '*'"
+
+                    GIT_COMMIT_HASH  = sh(script: 'git log -n 1 --pretty=format:%H', returnStdout: true).trim()
+                    GIT_COMMIT_SHORT = GIT_COMMIT_HASH.take(7)
+                    PACKAGE_VERSION  = "${params.BASE_VER}-ci.${env.BUILD_NUMBER}.g${GIT_COMMIT_SHORT}"
+                    IMAGE_TAG        = "${env.BUILD_NUMBER}-${GIT_COMMIT_SHORT}"   // immutable build+hash tag
+                    println "Commit ${GIT_COMMIT_HASH} | version ${PACKAGE_VERSION} | image tag ${IMAGE_TAG}"
+                }
+            }
+        }
+
+        stage('Locate AppHost') {
+            steps {
+                script {
+                    def p = params.APPHOST_PROJECT?.trim()
+                    if (p) {
+                        APPHOST_DIR = p.toLowerCase().endsWith('.csproj') ? p.substring(0, p.lastIndexOf('/')) : p
+                    } else {
+                        def hit = sh(script: "ls -1 */*.AppHost.csproj **/*.AppHost.csproj 2>/dev/null | head -1", returnStdout: true).trim()
+                        if (!hit) { error 'No *.AppHost.csproj found — set APPHOST_PROJECT to the Aspire AppHost path.' }
+                        APPHOST_DIR = hit.substring(0, hit.lastIndexOf('/'))
+                    }
+                    APP_HOST_NAME = sh(script: "basename \$(ls ${APPHOST_DIR}/*.AppHost.csproj) .csproj", returnStdout: true).trim()
+                    APP_NAME = (params.APP_NAME?.trim() ?: APP_HOST_NAME.replaceFirst(/(?i)\\.AppHost\$/, '')).toLowerCase()
+                    println "AppHost: ${APPHOST_DIR} (${APP_HOST_NAME}) | app name: ${APP_NAME}"
+                }
+            }
+        }
+
+        stage('Install aspirate') {
+            steps {
+                sh """
+                    set -e
+                    export PATH="\$PATH:\$HOME/.dotnet/tools"
+                    if ! command -v aspirate >/dev/null 2>&1; then
+                        dotnet tool install -g Aspirate ${params.ASPIRATE_PACKAGE_VERSION?.trim() ? "--version ${params.ASPIRATE_PACKAGE_VERSION.trim()}" : ''}
+                    fi
+                    aspirate version
+                """
+            }
+        }
+
+        stage('Build + push images, generate manifests') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: "${params.NEXUS_DOCKER_CREDENTIAL_ID}", usernameVariable: 'NEXUS_DOCKER_USER', passwordVariable: 'NEXUS_DOCKER_PASS')]) {
+                    script {
+                        sh """
+                            set -e
+                            echo "\$NEXUS_DOCKER_PASS" | docker login ${params.NEXUS_DOCKER_PROTOCOL}${params.NEXUS_DOCKER_HOST} -u "\$NEXUS_DOCKER_USER" --password-stdin
+                        """
+                        NEXUS_DOCKER_AUTHENTICATED = true
+
+                        // aspirate builds each Aspire resource image (dotnet publish -t:PublishContainer via the
+                        // docker builder) and pushes to Nexus tagged IMAGE_TAG; --skip-build is NOT used here (this
+                        // job IS the build). The registry is treated as insecure (HTTP) for the SDK/docker push.
+                        sh """
+                            set -e
+                            export PATH="\$PATH:\$HOME/.dotnet/tools"
+                            export DOTNET_CONTAINER_INSECURE_REGISTRIES=${params.NEXUS_DOCKER_HOST}
+                            cd ${APPHOST_DIR}
+                            aspirate init -cr ${params.NEXUS_DOCKER_HOST} -ct ${IMAGE_TAG} --disable-secrets --non-interactive
+                            aspirate generate --non-interactive --disable-secrets --include-dashboard false \\
+                                --namespace ${params.NAMESPACE} --image-pull-policy IfNotPresent --output-format kustomize
+                        """
+
+                        // The images aspirate just pushed (one per Aspire resource), tagged IMAGE_TAG. Captured at
+                        // script scope for the Scan + SBOM stage.
+                        def refs = sh(script: "grep -rhoE 'image: *\\S+' ${APPHOST_DIR}/aspirate-output | awk '{print \$2}' | sort -u", returnStdout: true).trim()
+                        IMAGE_REFS = refs ? refs.readLines() : []
+
+                        // Add the floating + per-build + per-commit tags for parity with cicd-publish-nexus-docker.
+                        IMAGE_REFS.each { ref ->
+                            def repoRef = ref.replaceFirst(/:[^\\/:]+\$/, '')   // strip :tag
+                            sh """
+                                set -e
+                                docker pull ${ref}
+                                for t in latest ci-${env.BUILD_NUMBER} ${GIT_COMMIT_SHORT}; do
+                                    docker tag ${ref} ${repoRef}:\$t
+                                    docker push ${repoRef}:\$t
+                                done
+                            """
+                        }
+                        if (IMAGE_REFS) println "Tagged ${IMAGE_REFS.size()} image(s) with: ${IMAGE_TAG}, latest, ci-${env.BUILD_NUMBER}, ${GIT_COMMIT_SHORT}"
+                    }
+                }
+            }
+        }
+
+        stage('Scan images + upload SBOM') {
+            when { expression { return IMAGE_REFS && !IMAGE_REFS.isEmpty() } }
+            steps {
+                withCredentials([usernamePassword(credentialsId: "${params.SBOM_NEXUS_CREDENTIAL_ID}", usernameVariable: 'NEXUS_SBOM_USER', passwordVariable: 'NEXUS_SBOM_PASS')]) {
+                    script {
+                        // Resolve Trivy once (baked into the build image; download fallback) — mirrors cicd-publish-nexus-docker.
+                        def trivy = sh(returnStdout: true, script: """
+                            set -e
+                            if command -v trivy >/dev/null 2>&1; then command -v trivy
+                            else
+                                mkdir -p ${env.WORKSPACE}/.trivy; BIN=${env.WORKSPACE}/.trivy/trivy
+                                if [ ! -x "\$BIN" ]; then
+                                    V=\$(echo "${params.TRIVY_VERSION}" | sed 's/^v//')
+                                    curl -fsSL "https://github.com/aquasecurity/trivy/releases/download/${params.TRIVY_VERSION}/trivy_\${V}_Linux-64bit.tar.gz" | tar -xz -C ${env.WORKSPACE}/.trivy/ trivy >&2
+                                    chmod +x "\$BIN"
+                                fi
+                                echo "\$BIN"
+                            fi
+                        """).trim()
+                        def gate = [high: 'HIGH,CRITICAL', critical: 'CRITICAL'][params.FAIL_ON_SEVERITY]
+                        def base = params.SBOM_NEXUS_REPO_URL.trim().replaceFirst(/\\/\$/, '')
+
+                        IMAGE_REFS.each { ref ->
+                            def name = ref.replaceFirst(/:[^\\/:]+\$/, '').tokenize('/').last()  // resource name
+                            sh """
+                                set -e
+                                mkdir -p _meta
+                                echo "Trivy scan: ${ref}"
+                                ${trivy} image --scanners vuln --format cyclonedx --output _meta/image-${name}.json ${ref}
+                                curl -fsS --user "\$NEXUS_SBOM_USER:\$NEXUS_SBOM_PASS" --upload-file _meta/image-${name}.json "${base}/sbom/${PACKAGE_VERSION}/image-${name}.json"
+                            """
+                            if (gate) {
+                                def rc = sh(returnStatus: true, script: "${trivy} image --scanners vuln --exit-code 1 --severity ${gate} --quiet ${ref}")
+                                if (rc != 0) error "Image '${name}' has ${params.FAIL_ON_SEVERITY}+ vulnerabilities — failing publish (FAIL_ON_SEVERITY=${params.FAIL_ON_SEVERITY})."
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Publish manifest archive to Nexus') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: "${params.NEXUS_RAW_CREDENTIAL_ID}", usernameVariable: 'NEXUS_RAW_USER', passwordVariable: 'NEXUS_RAW_PASS')]) {
+                    script {
+                        def base = params.NEXUS_RAW_REPO_URL.trim().replaceFirst(/\\/\$/, '')
+                        MANIFEST_URL = "${base}/${APP_NAME}/${PACKAGE_VERSION}/aspirate-output.zip"
+                        sh """
+                            set -e
+                            cd ${APPHOST_DIR}
+                            rm -f aspirate-output.zip
+                            if command -v zip >/dev/null 2>&1; then zip -qr aspirate-output.zip aspirate-output
+                            else (cd aspirate-output && find . -type f | zip -q ../aspirate-output.zip -@); fi
+                            echo "PUT ${MANIFEST_URL}"
+                            curl -fsS --user "\$NEXUS_RAW_USER:\$NEXUS_RAW_PASS" --upload-file aspirate-output.zip "${MANIFEST_URL}"
+                        """
+                        println "Manifest source (register in Deployment -> Aspire apps): ${MANIFEST_URL}"
+                    }
+                }
+            }
+        }
+
+        stage('Archive build info') {
+            steps {
+                script {
+                    writeJSON file: 'build-info.json', json: [
+                        app:                  APP_NAME,
+                        packageVersion:       PACKAGE_VERSION,
+                        imageTag:             IMAGE_TAG,
+                        gitUrl:               params.GIT_URL,
+                        gitBranch:            params.GIT_BRANCH,
+                        gitCommitHash:        GIT_COMMIT_HASH,
+                        gitCommitShort:       GIT_COMMIT_SHORT,
+                        buildNumber:          env.BUILD_NUMBER,
+                        registry:             params.NEXUS_DOCKER_HOST,
+                        namespace:            params.NAMESPACE,
+                        manifestSourceUrl:    MANIFEST_URL,
+                        buildTimestamp:       new Date().format("yyyy-MM-dd'T'HH:mm:ss'Z'", TimeZone.getTimeZone('UTC'))
+                    ], pretty: 2
+                    sh 'cat build-info.json'
+                    archiveArtifacts artifacts: 'build-info.json', fingerprint: true, onlyIfSuccessful: true
+                    currentBuild.description = "${APP_NAME} ${PACKAGE_VERSION}"
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            script {
+                if (NEXUS_DOCKER_AUTHENTICATED) { sh "docker logout ${params.NEXUS_DOCKER_PROTOCOL}${params.NEXUS_DOCKER_HOST} || true" }
+            }
+        }
+        success { echo "Published Aspire app '${APP_NAME}' ${PACKAGE_VERSION}: images @ ${IMAGE_TAG} + manifest ${MANIFEST_URL}" }
+        failure { echo "Build #${BUILD_NUMBER} failed at stage: ${env.STAGE_NAME}" }
+    }
+}

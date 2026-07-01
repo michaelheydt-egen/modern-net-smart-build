@@ -19,6 +19,8 @@ internal static class RepositoryMapping
         BaseVersion: r.BaseVersion,
         IsActive: r.IsActive,
         AllowContainerPublish: r.AllowContainerPublish,
+        BuildKind: (BuildKindDto)(int)r.BuildKind,
+        AppHostPath: r.AppHostPath,
         CreatedAtUtc: r.CreatedAtUtc,
         Components: r.Components.OrderBy(c => c.ContainerName).Select(c => c.ToDto()).ToList());
 
@@ -31,4 +33,5 @@ internal static class RepositoryMapping
         IsActive: c.IsActive);
 
     public static RepositoryProvider ToDomain(this RepositoryProviderDto p) => (RepositoryProvider)(int)p;
+    public static BuildKind ToDomain(this BuildKindDto k) => (BuildKind)(int)k;
 }

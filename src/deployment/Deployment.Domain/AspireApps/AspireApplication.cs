@@ -25,6 +25,10 @@ public sealed class AspireApplication : AggregateRoot<Guid>
     public string? Version { get; private set; }
 
     public bool IsActive { get; private set; }
+
+    /// <summary>When true, a name-matched CI <c>AspireAppPublished</c> event auto-triggers a deployment.</summary>
+    public bool AutoDeploy { get; private set; }
+
     public DateTimeOffset CreatedAtUtc { get; private set; }
     public DateTimeOffset UpdatedAtUtc { get; private set; }
 
@@ -67,6 +71,33 @@ public sealed class AspireApplication : AggregateRoot<Guid>
         if (IsActive == active) return;
         IsActive = active;
         UpdatedAtUtc = occurredAtUtc;
+    }
+
+    public void SetAutoDeploy(bool autoDeploy, DateTimeOffset occurredAtUtc)
+    {
+        if (AutoDeploy == autoDeploy) return;
+        AutoDeploy = autoDeploy;
+        UpdatedAtUtc = occurredAtUtc;
+        RaiseEvent(new AspireApplicationAutoDeployChanged(Id, autoDeploy, occurredAtUtc));
+    }
+
+    /// <summary>
+    /// Refresh the manifest source (+ optional version) from a CI publish. Idempotent: a repeat with the
+    /// same source and version is a no-op (returns false), so the consumer can skip a redundant auto-deploy.
+    /// </summary>
+    public bool ApplyPublishedManifest(string manifestSource, string? version, DateTimeOffset occurredAtUtc)
+    {
+        var source = Require(manifestSource, nameof(manifestSource));
+        var ver = Clean(version);
+        if (string.Equals(ManifestSource, source, StringComparison.Ordinal) &&
+            string.Equals(Version, ver, StringComparison.Ordinal))
+            return false;
+
+        ManifestSource = source;
+        Version = ver;
+        UpdatedAtUtc = occurredAtUtc;
+        RaiseEvent(new AspireApplicationManifestPublished(Id, Name, source, ver, occurredAtUtc));
+        return true;
     }
 
     private static string Require(string value, string name)

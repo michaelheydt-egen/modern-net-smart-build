@@ -1,0 +1,7 @@
+bin/
+obj/
+aspirate-output/
+aspirate-output.zip
+manifest.json
+aspire-manifest.json
+aspirate-state*.json

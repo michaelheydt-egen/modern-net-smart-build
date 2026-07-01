@@ -44,7 +44,7 @@ public static class RepositoriesEndpoints
         {
             var cmd = new RegisterRepositoryCommand(
                 Guid.NewGuid(), body.Name, body.GitUrl, body.Provider,
-                body.DefaultBranch, body.CiJobName, body.BaseVersion);
+                body.DefaultBranch, body.CiJobName, body.BaseVersion, body.BuildKind, body.AppHostPath);
             return await ValidateAndRun(validator, cmd, ct, async () =>
             {
                 var dto = await handler.HandleAsync(cmd, ct);
@@ -61,7 +61,7 @@ public static class RepositoriesEndpoints
         {
             var cmd = new UpdateRepositoryCommand(
                 id, body.Name, body.GitUrl, body.Provider,
-                body.DefaultBranch, body.CiJobName, body.BaseVersion);
+                body.DefaultBranch, body.CiJobName, body.BaseVersion, body.BuildKind, body.AppHostPath);
             return await ValidateAndRun(validator, cmd, ct, async () =>
                 Results.Ok(await handler.HandleAsync(cmd, ct)));
         });
