@@ -16,7 +16,9 @@ public sealed record UpdateRepositoryCommand(
     RepositoryProviderDto Provider,
     string DefaultBranch,
     string CiJobName,
-    string BaseVersion);
+    string BaseVersion,
+    BuildKindDto BuildKind = BuildKindDto.Standard,
+    string? AppHostPath = null);
 
 public sealed class UpdateRepositoryValidator : AbstractValidator<UpdateRepositoryCommand>
 {
@@ -28,6 +30,7 @@ public sealed class UpdateRepositoryValidator : AbstractValidator<UpdateReposito
         RuleFor(x => x.DefaultBranch).NotEmpty().MaximumLength(200);
         RuleFor(x => x.CiJobName).NotEmpty().MaximumLength(200);
         RuleFor(x => x.BaseVersion).NotEmpty().MaximumLength(64);
+        RuleFor(x => x.AppHostPath).MaximumLength(500);
     }
 }
 
@@ -60,7 +63,9 @@ public sealed class UpdateRepositoryHandler
             defaultBranch: cmd.DefaultBranch,
             ciJobName: cmd.CiJobName,
             baseVersion: cmd.BaseVersion,
-            occurredAtUtc: _clock.GetUtcNow());
+            occurredAtUtc: _clock.GetUtcNow(),
+            buildKind: cmd.BuildKind.ToDomain(),
+            appHostPath: cmd.AppHostPath);
 
         await _uow.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         return repository.ToDto();

@@ -83,6 +83,8 @@ public sealed class DeploymentApiClient
     public Task UpdateAspireAppAsync(Guid id, UpdateAspireApplicationRequest body, CancellationToken ct = default)
         => PutJsonAsync($"api/deployment/aspire-apps/{id}", body, ct);
     public Task DeleteAspireAppAsync(Guid id, CancellationToken ct = default) => DeleteAsync($"api/deployment/aspire-apps/{id}", ct);
+    public Task SetAspireAutoDeployAsync(Guid id, bool autoDeploy, CancellationToken ct = default)
+        => PostJsonNoBodyAsync($"api/deployment/aspire-apps/{id}/auto-deploy", new SetAspireAutoDeployRequest(autoDeploy), ct);
     public Task<DeployResponse> DeployAspireAppAsync(Guid id, TriggerAspireDeploymentRequest body, CancellationToken ct = default)
         => PostJsonAsync<TriggerAspireDeploymentRequest, DeployResponse>($"api/deployment/aspire-apps/{id}/deploy", body, ct);
     public async Task<IReadOnlyList<AspireApplicationRunDto>> ListAspireRunsAsync(Guid? applicationId = null, CancellationToken ct = default)

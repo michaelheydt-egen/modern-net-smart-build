@@ -42,6 +42,12 @@ public static class AspireAppsEndpoints
             return result.RunId is { } ? Results.Accepted($"/api/deployment/aspire-runs/{result.RunId}", result) : Results.Ok(result);
         });
 
+        g.MapPost("{id:guid}/auto-deploy", async (Guid id, SetAspireAutoDeployRequest body, SetAspireAutoDeployHandler h, CancellationToken ct) =>
+        {
+            try { await h.HandleAsync(new SetAspireAutoDeployCommand(id, body.AutoDeploy), ct); return Results.NoContent(); }
+            catch (InvalidOperationException ex) { return Results.Problem(title: "Not found", detail: ex.Message, statusCode: 404); }
+        });
+
         return app;
     }
 

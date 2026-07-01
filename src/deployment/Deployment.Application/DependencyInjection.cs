@@ -53,6 +53,7 @@ public static class DependencyInjection
         services.AddScoped<CreateAspireApplicationHandler>();
         services.AddScoped<UpdateAspireApplicationHandler>();
         services.AddScoped<DeleteAspireApplicationHandler>();
+        services.AddScoped<SetAspireAutoDeployHandler>();
         services.AddScoped<ListAspireApplicationsHandler>();
         services.AddScoped<GetAspireApplicationByIdHandler>();
         services.AddScoped<RequestAspireDeploymentHandler>();

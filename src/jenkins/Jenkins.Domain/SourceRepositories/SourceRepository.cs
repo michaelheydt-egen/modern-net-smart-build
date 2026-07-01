@@ -39,6 +39,12 @@ public sealed class SourceRepository : AggregateRoot<Guid>
     /// </summary>
     public bool AllowContainerPublish { get; private set; }
 
+    /// <summary>How this repo is built: the standard chain, or a .NET Aspire app via Aspir8.</summary>
+    public BuildKind BuildKind { get; private set; }
+
+    /// <summary>For an Aspire repo: path (within the repo) to the AppHost dir/csproj; null = auto-discover.</summary>
+    public string? AppHostPath { get; private set; }
+
     public DateTimeOffset CreatedAtUtc { get; private set; }
 
     private readonly List<DeployableComponent> _components = new();
@@ -62,7 +68,9 @@ public sealed class SourceRepository : AggregateRoot<Guid>
         string defaultBranch,
         string ciJobName,
         string baseVersion,
-        DateTimeOffset createdAtUtc)
+        DateTimeOffset createdAtUtc,
+        BuildKind buildKind = BuildKind.Standard,
+        string? appHostPath = null)
     {
         if (id == Guid.Empty) throw new ArgumentException("Id cannot be empty.", nameof(id));
         if (string.IsNullOrWhiteSpace(name))
@@ -85,11 +93,15 @@ public sealed class SourceRepository : AggregateRoot<Guid>
         BaseVersion = baseVersion.Trim();
         IsActive = true;
         AllowContainerPublish = true;
+        BuildKind = buildKind;
+        AppHostPath = Clean(appHostPath);
         CreatedAtUtc = createdAtUtc;
 
         RaiseEvent(new RepositoryRegistered(
             Id, Name, GitUrl, Provider, DefaultBranch, CiJobName, BaseVersion, createdAtUtc));
     }
+
+    private static string? Clean(string? v) => string.IsNullOrWhiteSpace(v) ? null : v.Trim();
 
     // --- Details ---
 
@@ -104,7 +116,9 @@ public sealed class SourceRepository : AggregateRoot<Guid>
         string defaultBranch,
         string ciJobName,
         string baseVersion,
-        DateTimeOffset occurredAtUtc)
+        DateTimeOffset occurredAtUtc,
+        BuildKind buildKind = BuildKind.Standard,
+        string? appHostPath = null)
     {
         if (string.IsNullOrWhiteSpace(name))
             throw new ArgumentException("Name cannot be empty.", nameof(name));
@@ -123,6 +137,8 @@ public sealed class SourceRepository : AggregateRoot<Guid>
         DefaultBranch = defaultBranch.Trim();
         CiJobName = ciJobName.Trim();
         BaseVersion = baseVersion.Trim();
+        BuildKind = buildKind;
+        AppHostPath = Clean(appHostPath);
 
         RaiseEvent(new RepositoryDetailsUpdated(
             Id, Name, GitUrl, Provider, DefaultBranch, CiJobName, BaseVersion, occurredAtUtc));

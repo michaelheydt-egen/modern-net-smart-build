@@ -48,7 +48,11 @@
                 <MudTh Style="width: 9rem; text-align: right;"></MudTh>
             </HeaderContent>
             <RowTemplate>
-                <MudTd>@context.Name</MudTd>
+                <MudTd>
+                    @context.Name
+                    @if (context.BuildKind == BuildKindDto.Aspire)
+                    { <MudChip T="string" Size="Size.Small" Color="Color.Secondary" Variant="Variant.Filled" Class="ml-1">Aspire</MudChip> }
+                </MudTd>
                 <MudTd>
                     <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@context.Provider</MudChip>
                 </MudTd>
@@ -138,8 +142,16 @@
             }
         </MudSelect>
         <MudTextField @bind-Value="_reg.DefaultBranch" Label="Default branch" />
+        <MudSelect @bind-Value="_reg.BuildKind" Label="Build kind" T="BuildKindDto" @bind-Value:after="OnBuildKindChanged">
+            @foreach (var k in Enum.GetValues<BuildKindDto>()) { <MudSelectItem Value="@k">@k</MudSelectItem> }
+        </MudSelect>
         <MudTextField @bind-Value="_reg.CiJobName" Label="CI job name" />
         <MudTextField @bind-Value="_reg.BaseVersion" Label="Base version (BASE_VER)" />
+        @if (_reg.BuildKind == BuildKindDto.Aspire)
+        {
+            <MudTextField @bind-Value="_reg.AppHostPath" Label="AppHost path (blank = auto-discover *.AppHost)"
+                          HelperText="path within the repo to the Aspire AppHost dir or .csproj" />
+        }
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="@(() => _showRegister = false)">Cancel</MudButton>
@@ -229,8 +241,19 @@
             DefaultBranch = repo.DefaultBranch,
             CiJobName = repo.CiJobName,
             BaseVersion = repo.BaseVersion,
+            BuildKind = repo.BuildKind,
+            AppHostPath = repo.AppHostPath ?? "",
         };
         _showRegister = true;
+    }
+
+    private void OnBuildKindChanged()
+    {
+        // Default the CI job to the matching publish job when the kind flips (only if still on the other default).
+        if (_reg.BuildKind == BuildKindDto.Aspire && _reg.CiJobName is "cicd-build" or "")
+            _reg.CiJobName = "cicd-aspire-publish";
+        else if (_reg.BuildKind == BuildKindDto.Standard && _reg.CiJobName == "cicd-aspire-publish")
+            _reg.CiJobName = "cicd-build";
     }
 
     private async Task SaveAsync()
@@ -238,16 +261,17 @@
         _busy = true;
         try
         {
+            var appHost = string.IsNullOrWhiteSpace(_reg.AppHostPath) ? null : _reg.AppHostPath;
             if (_editingId is { } id)
             {
                 await Api.UpdateRepositoryAsync(id, new UpdateRepositoryRequest(
-                    _reg.Name, _reg.GitUrl, _reg.Provider, _reg.DefaultBranch, _reg.CiJobName, _reg.BaseVersion));
+                    _reg.Name, _reg.GitUrl, _reg.Provider, _reg.DefaultBranch, _reg.CiJobName, _reg.BaseVersion, _reg.BuildKind, appHost));
                 Snackbar.Add($"Updated '{_reg.Name}'.", Severity.Success);
             }
             else
             {
                 await Api.RegisterRepositoryAsync(new RegisterRepositoryRequest(
-                    _reg.Name, _reg.GitUrl, _reg.Provider, _reg.DefaultBranch, _reg.CiJobName, _reg.BaseVersion));
+                    _reg.Name, _reg.GitUrl, _reg.Provider, _reg.DefaultBranch, _reg.CiJobName, _reg.BaseVersion, _reg.BuildKind, appHost));
                 Snackbar.Add($"Registered '{_reg.Name}'.", Severity.Success);
             }
             _showRegister = false;
@@ -328,6 +352,8 @@
         public string DefaultBranch { get; set; } = "main";
         public string CiJobName { get; set; } = "cicd-build";
         public string BaseVersion { get; set; } = "1.0.0";
+        public BuildKindDto BuildKind { get; set; } = BuildKindDto.Standard;
+        public string AppHostPath { get; set; } = "";
     }
 
     private sealed class MapForm

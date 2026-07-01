@@ -27,6 +27,11 @@ pipeline {
 
         string(name: 'NEXUS_RAW_REPO_URL', defaultValue: 'http://nexus:8081/repository/raw-hosted/', description: 'Nexus raw (hosted) repo base URL for the Kustomize-output archive.')
         string(name: 'NEXUS_RAW_CREDENTIAL_ID', defaultValue: 'nexus-sbom', description: 'Jenkins username/password credential id for the Nexus REST API (raw upload).')
+
+        string(name: 'TRIVY_VERSION', defaultValue: 'v0.55.0', description: 'Trivy release tag used to scan the built images (fallback download if not baked into the build image).')
+        choice(name: 'FAIL_ON_SEVERITY', choices: ['none', 'high', 'critical'], description: 'Fail the publish when a built image has OS/library vulnerabilities at this severity (or worse). Default: report only.')
+        string(name: 'SBOM_NEXUS_REPO_URL', defaultValue: 'http://nexus:8081/repository/sboms/', description: 'Nexus raw (hosted) repo URL where per-image scan reports are uploaded.')
+        string(name: 'SBOM_NEXUS_CREDENTIAL_ID', defaultValue: 'nexus-sbom', description: 'Jenkins username/password credential id for the Nexus REST API (SBOM upload).')
     }
 
     options {
@@ -118,22 +123,64 @@ pipeline {
                                 --namespace ${params.NAMESPACE} --image-pull-policy IfNotPresent --output-format kustomize
                         """
 
-                        // Add the floating + per-build + per-commit tags for parity with cicd-publish-nexus-docker,
-                        // pointing at the same images we just pushed (parsed from the generated manifests).
+                        // The images aspirate just pushed (one per Aspire resource), tagged IMAGE_TAG. Captured at
+                        // script scope for the Scan + SBOM stage.
                         def refs = sh(script: "grep -rhoE 'image: *\\S+' ${APPHOST_DIR}/aspirate-output | awk '{print \$2}' | sort -u", returnStdout: true).trim()
-                        if (refs) {
-                            refs.readLines().each { ref ->
-                                def repoRef = ref.replaceFirst(/:[^\\/:]+\$/, '')   // strip :tag
-                                sh """
-                                    set -e
-                                    docker pull ${ref}
-                                    for t in latest ci-${env.BUILD_NUMBER} ${GIT_COMMIT_SHORT}; do
-                                        docker tag ${ref} ${repoRef}:\$t
-                                        docker push ${repoRef}:\$t
-                                    done
-                                """
+                        IMAGE_REFS = refs ? refs.readLines() : []
+
+                        // Add the floating + per-build + per-commit tags for parity with cicd-publish-nexus-docker.
+                        IMAGE_REFS.each { ref ->
+                            def repoRef = ref.replaceFirst(/:[^\\/:]+\$/, '')   // strip :tag
+                            sh """
+                                set -e
+                                docker pull ${ref}
+                                for t in latest ci-${env.BUILD_NUMBER} ${GIT_COMMIT_SHORT}; do
+                                    docker tag ${ref} ${repoRef}:\$t
+                                    docker push ${repoRef}:\$t
+                                done
+                            """
+                        }
+                        if (IMAGE_REFS) println "Tagged ${IMAGE_REFS.size()} image(s) with: ${IMAGE_TAG}, latest, ci-${env.BUILD_NUMBER}, ${GIT_COMMIT_SHORT}"
+                    }
+                }
+            }
+        }
+
+        stage('Scan images + upload SBOM') {
+            when { expression { return IMAGE_REFS && !IMAGE_REFS.isEmpty() } }
+            steps {
+                withCredentials([usernamePassword(credentialsId: "${params.SBOM_NEXUS_CREDENTIAL_ID}", usernameVariable: 'NEXUS_SBOM_USER', passwordVariable: 'NEXUS_SBOM_PASS')]) {
+                    script {
+                        // Resolve Trivy once (baked into the build image; download fallback) — mirrors cicd-publish-nexus-docker.
+                        def trivy = sh(returnStdout: true, script: """
+                            set -e
+                            if command -v trivy >/dev/null 2>&1; then command -v trivy
+                            else
+                                mkdir -p ${env.WORKSPACE}/.trivy; BIN=${env.WORKSPACE}/.trivy/trivy
+                                if [ ! -x "\$BIN" ]; then
+                                    V=\$(echo "${params.TRIVY_VERSION}" | sed 's/^v//')
+                                    curl -fsSL "https://github.com/aquasecurity/trivy/releases/download/${params.TRIVY_VERSION}/trivy_\${V}_Linux-64bit.tar.gz" | tar -xz -C ${env.WORKSPACE}/.trivy/ trivy >&2
+                                    chmod +x "\$BIN"
+                                fi
+                                echo "\$BIN"
+                            fi
+                        """).trim()
+                        def gate = [high: 'HIGH,CRITICAL', critical: 'CRITICAL'][params.FAIL_ON_SEVERITY]
+                        def base = params.SBOM_NEXUS_REPO_URL.trim().replaceFirst(/\\/\$/, '')
+
+                        IMAGE_REFS.each { ref ->
+                            def name = ref.replaceFirst(/:[^\\/:]+\$/, '').tokenize('/').last()  // resource name
+                            sh """
+                                set -e
+                                mkdir -p _meta
+                                echo "Trivy scan: ${ref}"
+                                ${trivy} image --scanners vuln --format cyclonedx --output _meta/image-${name}.json ${ref}
+                                curl -fsS --user "\$NEXUS_SBOM_USER:\$NEXUS_SBOM_PASS" --upload-file _meta/image-${name}.json "${base}/sbom/${PACKAGE_VERSION}/image-${name}.json"
+                            """
+                            if (gate) {
+                                def rc = sh(returnStatus: true, script: "${trivy} image --scanners vuln --exit-code 1 --severity ${gate} --quiet ${ref}")
+                                if (rc != 0) error "Image '${name}' has ${params.FAIL_ON_SEVERITY}+ vulnerabilities — failing publish (FAIL_ON_SEVERITY=${params.FAIL_ON_SEVERITY})."
                             }
-                            println "Tagged images with: ${IMAGE_TAG}, latest, ci-${env.BUILD_NUMBER}, ${GIT_COMMIT_SHORT}"
                         }
                     }
                 }

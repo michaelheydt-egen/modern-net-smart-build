@@ -47,12 +47,18 @@
     else if (_apps is not null)
     {
         <MudTable Items="@_apps" Dense="true" Hover="true" Striped="true" T="AspireApplicationDto">
-            <HeaderContent><MudTh>Name</MudTh><MudTh>Environment</MudTh><MudTh>Version</MudTh><MudTh>Manifest source</MudTh><MudTh Style="width:12rem;">Actions</MudTh></HeaderContent>
+            <HeaderContent><MudTh>Name</MudTh><MudTh>Environment</MudTh><MudTh>Version</MudTh><MudTh>Manifest source</MudTh><MudTh Style="width:7rem;">Auto-deploy</MudTh><MudTh Style="width:12rem;">Actions</MudTh></HeaderContent>
             <RowTemplate>
                 <MudTd>@context.Name</MudTd>
                 <MudTd>@context.EnvironmentName</MudTd>
                 <MudTd Style="font-family: ui-monospace, monospace; font-size:0.85em;">@(context.Version ?? "—")</MudTd>
                 <MudTd Style="font-family: ui-monospace, monospace; font-size:0.78em; max-width:24rem; overflow:hidden; text-overflow:ellipsis;">@context.ManifestSource</MudTd>
+                <MudTd>
+                    <MudTooltip Text="When on, a CI publish of this app auto-triggers a deployment.">
+                        <MudSwitch T="bool" Value="context.AutoDeploy" Color="Color.Primary" Size="Size.Small"
+                                   ValueChanged="@(v => ToggleAutoDeployAsync(context, v))" Disabled="_busy" />
+                    </MudTooltip>
+                </MudTd>
                 <MudTd>
                     <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.RocketLaunch" OnClick="@(() => DeployAsync(context))" Disabled="_busy">Deploy</MudButton>
                     <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Delete" Color="Color.Error" OnClick="@(() => DeleteAsync(context))" />
@@ -167,6 +173,19 @@
     {
         try { await Api.DeleteAspireAppAsync(app.Id); await LoadAsync(); }
         catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+
+    private async Task ToggleAutoDeployAsync(AspireApplicationDto app, bool value)
+    {
+        _busy = true;
+        try
+        {
+            await Api.SetAspireAutoDeployAsync(app.Id, value);
+            Snackbar.Add($"Auto-deploy {(value ? "enabled" : "disabled")} for '{app.Name}'.", Severity.Info);
+            await LoadAsync();
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        finally { _busy = false; }
     }
 
     private void ShowLog(AspireApplicationRunDto run) { _logRun = run; _logShow = true; }

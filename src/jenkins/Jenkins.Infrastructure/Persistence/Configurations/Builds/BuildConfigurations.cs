@@ -28,6 +28,7 @@ public sealed class BuildConfiguration : IEntityTypeConfiguration<Build>
         b.Property(x => x.CompletedAtUtc);
         b.Property(x => x.DurationMs);
         b.Property(x => x.TriggeredBy).HasMaxLength(200);
+        b.Property(x => x.AspireManifestUrl).HasMaxLength(500);
 
         b.Ignore(x => x.IsTerminal);
 

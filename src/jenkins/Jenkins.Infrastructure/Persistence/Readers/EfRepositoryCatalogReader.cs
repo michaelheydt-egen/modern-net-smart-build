@@ -50,6 +50,8 @@ public sealed class EfRepositoryCatalogReader : IRepositoryCatalogReader
         r.BaseVersion,
         r.IsActive,
         r.AllowContainerPublish,
+        (BuildKindDto)(int)r.BuildKind,
+        r.AppHostPath,
         r.CreatedAtUtc,
         r.Components
             .OrderBy(c => c.ContainerName)

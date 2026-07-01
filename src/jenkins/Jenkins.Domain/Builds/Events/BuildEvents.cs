@@ -61,3 +61,18 @@ public sealed record ContainerPublished(
     string Version,
     string CommitSha,
     DateTimeOffset OccurredAtUtc) : IDomainEvent;
+
+/// <summary>
+/// Raised when an Aspire build's Kustomize-manifest archive is published to Nexus (its URL
+/// captured from <c>build-info.json</c>). Translated to the cross-service
+/// <c>Cicd.IntegrationEvents.Ci.AspireAppPublished</c> so the deployment service can update
+/// (and optionally auto-deploy) the matching <c>AspireApplication</c>.
+/// </summary>
+public sealed record AspireManifestPublished(
+    Guid BuildId,
+    Guid RepositoryId,
+    string AppName,
+    string ManifestUrl,
+    string Version,
+    string CommitSha,
+    DateTimeOffset OccurredAtUtc) : IDomainEvent;

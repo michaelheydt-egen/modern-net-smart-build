@@ -12,7 +12,9 @@ public sealed record RegisterRepositoryCommand(
     RepositoryProviderDto Provider,
     string DefaultBranch,
     string CiJobName,
-    string BaseVersion);
+    string BaseVersion,
+    BuildKindDto BuildKind = BuildKindDto.Standard,
+    string? AppHostPath = null);
 
 public sealed class RegisterRepositoryValidator : AbstractValidator<RegisterRepositoryCommand>
 {
@@ -24,6 +26,7 @@ public sealed class RegisterRepositoryValidator : AbstractValidator<RegisterRepo
         RuleFor(x => x.DefaultBranch).NotEmpty().MaximumLength(200);
         RuleFor(x => x.CiJobName).NotEmpty().MaximumLength(200);
         RuleFor(x => x.BaseVersion).NotEmpty().MaximumLength(64);
+        RuleFor(x => x.AppHostPath).MaximumLength(500);
     }
 }
 
@@ -54,7 +57,9 @@ public sealed class RegisterRepositoryHandler
             defaultBranch: cmd.DefaultBranch,
             ciJobName: cmd.CiJobName,
             baseVersion: cmd.BaseVersion,
-            createdAtUtc: _clock.GetUtcNow());
+            createdAtUtc: _clock.GetUtcNow(),
+            buildKind: cmd.BuildKind.ToDomain(),
+            appHostPath: cmd.AppHostPath);
 
         await _repositories.AddAsync(repository, cancellationToken).ConfigureAwait(false);
         await _uow.SaveChangesAsync(cancellationToken).ConfigureAwait(false);

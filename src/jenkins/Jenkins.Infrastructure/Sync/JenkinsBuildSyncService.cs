@@ -111,6 +111,7 @@ public sealed class JenkinsBuildSyncService : BackgroundService
         var recordBuild = scope.ServiceProvider.GetRequiredService<RecordBuildHandler>();
         var completeBuild = scope.ServiceProvider.GetRequiredService<CompleteBuildHandler>();
         var reconcile = scope.ServiceProvider.GetRequiredService<ReconcileBuildArtifactsHandler>();
+        var recordAspire = scope.ServiceProvider.GetRequiredService<RecordAspireManifestHandler>();
         var nexus = scope.ServiceProvider.GetService<INexusArtifactReader>(); // null when Nexus unconfigured
         if (nexus is null && !_nexusDisabledLogged)
         {
@@ -124,7 +125,7 @@ public sealed class JenkinsBuildSyncService : BackgroundService
         {
             try
             {
-                await IngestBuildAsync(repo, build, recordBuild, completeBuild, reconcile, nexus, ct).ConfigureAwait(false);
+                await IngestBuildAsync(repo, build, recordBuild, completeBuild, reconcile, recordAspire, nexus, ct).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -139,6 +140,7 @@ public sealed class JenkinsBuildSyncService : BackgroundService
         RecordBuildHandler recordBuild,
         CompleteBuildHandler completeBuild,
         ReconcileBuildArtifactsHandler reconcile,
+        RecordAspireManifestHandler recordAspire,
         INexusArtifactReader? nexus,
         CancellationToken ct)
     {
@@ -236,6 +238,31 @@ public sealed class JenkinsBuildSyncService : BackgroundService
                 _logger.LogDebug(ex, "Artifact reconciliation for {Job}#{Number} failed; will retry", repo.CiJobName, build.Number);
             }
         }
+
+        // Aspire CI→deploy handoff: a succeeded Aspire build whose build-info.json carries the
+        // published Kustomize-manifest URL + app name records it on the aggregate, raising the
+        // AspireManifestPublished → AspireAppPublished handoff. Idempotent (domain no-ops a repeat),
+        // so it's safe to re-observe each tick.
+        if (succeeded
+            && repo.BuildKind == BuildKindDto.Aspire
+            && !string.IsNullOrWhiteSpace(info.App)
+            && !string.IsNullOrWhiteSpace(info.ManifestSourceUrl))
+        {
+            try
+            {
+                await recordAspire.HandleAsync(new RecordAspireManifestCommand(
+                    BuildId: summary.Id,
+                    AppName: info.App!,
+                    ManifestUrl: info.ManifestSourceUrl!,
+                    Version: info.PackageVersion ?? string.Empty), ct).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "[aspire-handoff] {Job}#{Number}: failed to record manifest '{Manifest}' for app '{App}'; will retry",
+                    repo.CiJobName, build.Number, info.ManifestSourceUrl, info.App);
+            }
+        }
     }
 
     private async Task<JenkinsBuildInfo?> TryGetBuildInfoAsync(string job, int number, CancellationToken ct)
@@ -316,5 +343,9 @@ public sealed class JenkinsBuildSyncService : BackgroundService
         string? BuildNumber,
         string? PackVer,
         string? BuildFile,
-        string? BuildTimestamp);
+        string? BuildTimestamp,
+        // Aspire builds (cicd-aspire-publish) additionally carry the app name and the
+        // Nexus URL of the published Kustomize-manifest archive — drives the CI→deploy handoff.
+        string? App,
+        string? ManifestSourceUrl);
 }

@@ -9,6 +9,12 @@ public enum RepositoryProviderDto
     Other = 4,
 }
 
+public enum BuildKindDto
+{
+    Standard = 0,
+    Aspire = 1,
+}
+
 // --- Read-side DTOs ---
 
 public sealed record RepositoryDto(
@@ -21,6 +27,8 @@ public sealed record RepositoryDto(
     string BaseVersion,
     bool IsActive,
     bool AllowContainerPublish,
+    BuildKindDto BuildKind,
+    string? AppHostPath,
     DateTimeOffset CreatedAtUtc,
     IReadOnlyList<DeployableComponentDto> Components);
 
@@ -40,7 +48,9 @@ public sealed record RegisterRepositoryRequest(
     RepositoryProviderDto Provider,
     string DefaultBranch,
     string CiJobName,
-    string BaseVersion);
+    string BaseVersion,
+    BuildKindDto BuildKind = BuildKindDto.Standard,
+    string? AppHostPath = null);
 
 public sealed record UpdateRepositoryRequest(
     string Name,
@@ -48,7 +58,9 @@ public sealed record UpdateRepositoryRequest(
     RepositoryProviderDto Provider,
     string DefaultBranch,
     string CiJobName,
-    string BaseVersion);
+    string BaseVersion,
+    BuildKindDto BuildKind = BuildKindDto.Standard,
+    string? AppHostPath = null);
 
 public sealed record SetRepositoryActiveRequest(bool IsActive);
 

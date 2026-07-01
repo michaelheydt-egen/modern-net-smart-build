@@ -204,6 +204,8 @@ public sealed class PipelineRunExecutorService : BackgroundService
                 pars["GIT_BRANCH"] = repo.DefaultBranch;
                 if (!string.IsNullOrWhiteSpace(repo.BaseVersion))
                     pars["BASE_VER"] = repo.BaseVersion; // versioning base for the build job
+                if (!string.IsNullOrWhiteSpace(repo.AppHostPath))
+                    pars["APPHOST_PROJECT"] = repo.AppHostPath!; // Aspire build: where the AppHost lives
             }
             foreach (var kv in stage.Parameters) pars[kv.Key] = kv.Value; // explicit stage params win
             steps.Add(new PipelineStep(
