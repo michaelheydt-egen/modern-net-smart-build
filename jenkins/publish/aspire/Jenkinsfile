@@ -106,9 +106,30 @@ pipeline {
             steps {
                 withCredentials([usernamePassword(credentialsId: "${params.NEXUS_DOCKER_CREDENTIAL_ID}", usernameVariable: 'NEXUS_DOCKER_USER', passwordVariable: 'NEXUS_DOCKER_PASS')]) {
                     script {
+                        // The .NET SDK container tooling (aspirate's PublishContainer) only recognizes a registry
+                        // whose host is multi-label (contains a dot), 'localhost', or an IP — a single-label service
+                        // name like 'nexus' is rejected with CONTAINER2012 ("Could not recognize registry"). Docker
+                        // itself is fine with it (login/pull/push), and the deployment service repoints the registry
+                        // host at apply time, so the CI push host is purely internal. Resolve a single-label host to
+                        // its IP (same Nexus endpoint) so the SDK accepts it.
+                        def hostPort = params.NEXUS_DOCKER_HOST.trim()
+                        def parts    = hostPort.split(':', 2)
+                        def regHost  = parts[0]
+                        def regPort  = parts.length > 1 ? ":${parts[1]}" : ''
+                        BUILD_REGISTRY = hostPort
+                        if (regHost != 'localhost' && !regHost.contains('.')) {
+                            def ip = sh(returnStdout: true, script: "getent hosts ${regHost} | awk '{print \$1; exit}'").trim()
+                            if (ip) {
+                                BUILD_REGISTRY = "${ip}${regPort}"
+                                echo "SDK registry: '${regHost}' is single-label; pushing via resolved IP ${BUILD_REGISTRY} (the deployment service repoints the host at apply time)."
+                            } else {
+                                echo "WARNING: could not resolve '${regHost}' to an IP; using '${hostPort}' as-is (the .NET SDK may reject it with CONTAINER2012)."
+                            }
+                        }
+
                         sh """
                             set -e
-                            echo "\$NEXUS_DOCKER_PASS" | docker login ${params.NEXUS_DOCKER_PROTOCOL}${params.NEXUS_DOCKER_HOST} -u "\$NEXUS_DOCKER_USER" --password-stdin
+                            echo "\$NEXUS_DOCKER_PASS" | docker login ${params.NEXUS_DOCKER_PROTOCOL}${BUILD_REGISTRY} -u "\$NEXUS_DOCKER_USER" --password-stdin
                         """
                         NEXUS_DOCKER_AUTHENTICATED = true
 
@@ -118,31 +139,37 @@ pipeline {
                         sh """
                             set -e
                             export PATH="\$PATH:\$HOME/.dotnet/tools"
-                            export DOTNET_CONTAINER_INSECURE_REGISTRIES=${params.NEXUS_DOCKER_HOST}
+                            export DOTNET_CONTAINER_INSECURE_REGISTRIES=${BUILD_REGISTRY}
                             cd ${APPHOST_DIR}
-                            aspirate init -cr ${params.NEXUS_DOCKER_HOST} -ct ${IMAGE_TAG} --disable-secrets --non-interactive
+                            aspirate init -cr ${BUILD_REGISTRY} -ct ${IMAGE_TAG} --disable-secrets --non-interactive
                             aspirate generate --non-interactive --disable-secrets --include-dashboard false \\
                                 --namespace ${params.NAMESPACE} --image-pull-policy IfNotPresent --output-format kustomize
                         """
 
-                        // The images aspirate just pushed (one per Aspire resource), tagged IMAGE_TAG. Captured at
-                        // script scope for the Scan + SBOM stage.
-                        def refs = sh(script: "grep -rhoE 'image: *\\S+' ${APPHOST_DIR}/aspirate-output | awk '{print \$2}' | sort -u", returnStdout: true).trim()
-                        IMAGE_REFS = refs ? refs.readLines() : []
-
-                        // Add the floating + per-build + per-commit tags for parity with cicd-publish-nexus-docker.
-                        IMAGE_REFS.each { ref ->
+                        // aspirate tags each project image 'latest' — the .NET Aspire 9.1 manifest bakes a
+                        // per-resource tag, which has top precedence in aspir8 (ContainerDetailsService.HandleTags
+                        // returns early when the manifest tag is set), so `aspirate init -ct` is silently ignored.
+                        // Parse the pushed refs, then repoint everything to the immutable build#+commit tag: push it
+                        // (plus floating/per-build/per-commit tags for parity with cicd-publish-nexus-docker) and
+                        // rewrite the generated Kustomize manifests to it, so the archive and the deployer's
+                        // digest-pin are deterministic rather than racing a moving 'latest'.
+                        def parsedRefs = sh(script: "grep -rhoE 'image: *\\S+' ${APPHOST_DIR}/aspirate-output | awk '{print \$2}' | sort -u", returnStdout: true).trim()
+                        IMAGE_REFS = []
+                        (parsedRefs ? parsedRefs.readLines() : []).each { ref ->
                             def repoRef = ref.replaceFirst(/:[^\\/:]+\$/, '')   // strip :tag
                             sh """
                                 set -e
                                 docker pull ${ref}
-                                for t in latest ci-${env.BUILD_NUMBER} ${GIT_COMMIT_SHORT}; do
+                                for t in ${IMAGE_TAG} latest ci-${env.BUILD_NUMBER} ${GIT_COMMIT_SHORT}; do
                                     docker tag ${ref} ${repoRef}:\$t
                                     docker push ${repoRef}:\$t
                                 done
+                                # Repoint the generated manifests from aspirate's tag to the immutable build tag.
+                                grep -rlZ -- "${ref}" ${APPHOST_DIR}/aspirate-output | xargs -0 -r sed -i "s#${ref}#${repoRef}:${IMAGE_TAG}#g"
                             """
+                            IMAGE_REFS << "${repoRef}:${IMAGE_TAG}"
                         }
-                        if (IMAGE_REFS) println "Tagged ${IMAGE_REFS.size()} image(s) with: ${IMAGE_TAG}, latest, ci-${env.BUILD_NUMBER}, ${GIT_COMMIT_SHORT}"
+                        if (IMAGE_REFS) println "Tagged ${IMAGE_REFS.size()} image(s) with: ${IMAGE_TAG}, latest, ci-${env.BUILD_NUMBER}, ${GIT_COMMIT_SHORT}; manifests pinned to ${IMAGE_TAG}"
                     }
                 }
             }
@@ -238,7 +265,7 @@ pipeline {
     post {
         always {
             script {
-                if (NEXUS_DOCKER_AUTHENTICATED) { sh "docker logout ${params.NEXUS_DOCKER_PROTOCOL}${params.NEXUS_DOCKER_HOST} || true" }
+                if (NEXUS_DOCKER_AUTHENTICATED) { sh "docker logout ${params.NEXUS_DOCKER_PROTOCOL}${BUILD_REGISTRY} || true" }
             }
         }
         success { echo "Published Aspire app '${APP_NAME}' ${PACKAGE_VERSION}: images @ ${IMAGE_TAG} + manifest ${MANIFEST_URL}" }
