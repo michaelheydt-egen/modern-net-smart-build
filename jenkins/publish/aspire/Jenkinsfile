@@ -95,7 +95,9 @@ pipeline {
                     if ! command -v aspirate >/dev/null 2>&1; then
                         dotnet tool install -g Aspirate ${params.ASPIRATE_PACKAGE_VERSION?.trim() ? "--version ${params.ASPIRATE_PACKAGE_VERSION.trim()}" : ''}
                     fi
-                    aspirate version
+                    # Confirm the tool is installed + report its version. Aspirate's CLI has no
+                    # `version` subcommand (Spectre.Console.Cli), so read it from the tool manifest.
+                    dotnet tool list -g | grep -i aspirate
                 """
             }
         }
