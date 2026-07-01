@@ -174,9 +174,10 @@ public sealed class Build : AggregateRoot<Guid>
     /// <summary>
     /// Record that this Aspire build published its Kustomize-manifest archive to Nexus, raising
     /// <see cref="AspireManifestPublished"/> for the CI→deploy handoff. Idempotent: a repeat call
-    /// with the same manifest URL is a no-op (the sync worker re-observes each tick).
+    /// with the same manifest URL is a no-op (the sync worker re-observes each tick). Returns
+    /// <c>true</c> when the event was raised, <c>false</c> when it was a no-op.
     /// </summary>
-    public void RecordAspireManifest(string appName, string manifestUrl, string version, DateTimeOffset occurredAtUtc)
+    public bool RecordAspireManifest(string appName, string manifestUrl, string version, DateTimeOffset occurredAtUtc)
     {
         if (string.IsNullOrWhiteSpace(appName))
             throw new ArgumentException("appName cannot be empty.", nameof(appName));
@@ -184,12 +185,13 @@ public sealed class Build : AggregateRoot<Guid>
             throw new ArgumentException("manifestUrl cannot be empty.", nameof(manifestUrl));
 
         var url = manifestUrl.Trim();
-        if (string.Equals(AspireManifestUrl, url, StringComparison.Ordinal)) return;
+        if (string.Equals(AspireManifestUrl, url, StringComparison.Ordinal)) return false;
 
         AspireManifestUrl = url;
         RaiseEvent(new AspireManifestPublished(
             Id, RepositoryId, appName.Trim(), url,
             version?.Trim() ?? string.Empty, SourceRevision.CommitSha, occurredAtUtc));
+        return true;
     }
 
     // --- Terminal transitions ---

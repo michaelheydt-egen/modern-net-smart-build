@@ -250,11 +250,20 @@ public sealed class JenkinsBuildSyncService : BackgroundService
         {
             try
             {
-                await recordAspire.HandleAsync(new RecordAspireManifestCommand(
+                var emitted = await recordAspire.HandleAsync(new RecordAspireManifestCommand(
                     BuildId: summary.Id,
                     AppName: info.App!,
                     ManifestUrl: info.ManifestSourceUrl!,
                     Version: info.PackageVersion ?? string.Empty), ct).ConfigureAwait(false);
+
+                if (emitted)
+                    _logger.LogInformation(
+                        "[aspire-handoff] {Job}#{Number}: emitted AspireAppPublished app='{App}' version='{Version}' manifest='{Manifest}'",
+                        repo.CiJobName, build.Number, info.App, info.PackageVersion, info.ManifestSourceUrl);
+                else
+                    _logger.LogDebug(
+                        "[aspire-handoff] {Job}#{Number}: manifest already recorded for app '{App}' — no re-emit",
+                        repo.CiJobName, build.Number, info.App);
             }
             catch (Exception ex)
             {
@@ -262,6 +271,15 @@ public sealed class JenkinsBuildSyncService : BackgroundService
                     "[aspire-handoff] {Job}#{Number}: failed to record manifest '{Manifest}' for app '{App}'; will retry",
                     repo.CiJobName, build.Number, info.ManifestSourceUrl, info.App);
             }
+        }
+        else if (repo.BuildKind == BuildKindDto.Aspire && succeeded)
+        {
+            // Aspire repo + succeeded build, but the artifact didn't carry what the handoff needs — say so,
+            // otherwise "no event" looks the same as "not wired up".
+            _logger.LogInformation(
+                "[aspire-handoff] {Job}#{Number}: no event — build-info.json is missing app/manifestSourceUrl (app='{App}', manifest='{Manifest}'). " +
+                "Is this a cicd-aspire-publish build?",
+                repo.CiJobName, build.Number, info.App, info.ManifestSourceUrl);
         }
     }
 

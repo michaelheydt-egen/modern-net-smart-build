@@ -38,13 +38,15 @@ public sealed class RecordAspireManifestHandler
         _clock = clock;
     }
 
-    public async Task HandleAsync(RecordAspireManifestCommand cmd, CancellationToken cancellationToken = default)
+    /// <summary>Returns <c>true</c> when the manifest was newly recorded (event emitted), <c>false</c> on an idempotent no-op.</summary>
+    public async Task<bool> HandleAsync(RecordAspireManifestCommand cmd, CancellationToken cancellationToken = default)
     {
         var build = await _builds.GetByIdAsync(cmd.BuildId, cancellationToken).ConfigureAwait(false)
             ?? throw new InvalidOperationException($"Build {cmd.BuildId} not found.");
 
-        build.RecordAspireManifest(cmd.AppName, cmd.ManifestUrl, cmd.Version, _clock.GetUtcNow());
+        var emitted = build.RecordAspireManifest(cmd.AppName, cmd.ManifestUrl, cmd.Version, _clock.GetUtcNow());
 
         await _uow.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        return emitted;
     }
 }
