@@ -52,6 +52,21 @@ services:
       Database__AutoMigrate: "true"
       ConnectionStrings__Deployment: "Server=sqlserver;Database=Deployment;User Id=sa;Password=${SA_PASSWORD:-Your_Strong_Pass123};TrustServerCertificate=True;MultipleActiveResultSets=True"
       ConnectionStrings__messaging: "amqp://${RABBITMQ_USER:-cicd}:${RABBITMQ_PASSWORD:-cicd_local_dev}@rabbitmq:5672"
+      # --- Aspire cluster deploys (the image bundles aspirate + kubectl) -------------------
+      # Digest-pin source: whatever Nexus URL THIS service can reach.
+      Deployment__Nexus__RegistryV2Url: "${NEXUS_URL:-http://nexus:8081}"
+      Deployment__Nexus__Username: "${NEXUS_USER:-admin}"
+      Deployment__Nexus__Password: "${NEXUS_PASSWORD:-}"
+      # To actually apply to a cluster, mount a kubeconfig (below) reachable FROM this
+      # container and uncomment these; for an insecure Nexus also run kind-nexus-setup.sh.
+      # Deployment__Aspirate__Kubeconfig: "/kube/config"
+      # Deployment__Aspirate__PullRegistry: "${NEXUS_DOCKER_HOST:-nexus:8082}"
+      # Deployment__Aspirate__EnsurePullSecret: "true"
+    # volumes:
+    #   # A kubeconfig whose API-server address is reachable from this container. For kind,
+    #   # also `docker network connect kind cicd-deployment-api-1` and point the kubeconfig
+    #   # at the internal control-plane (https://<cluster>-control-plane:6443).
+    #   - "${KUBECONFIG_HOST:-~/.kube/config}:/kube/config:ro"
     ports:
       - "9601:8080"
     depends_on:
