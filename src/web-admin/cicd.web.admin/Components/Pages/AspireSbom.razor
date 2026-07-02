@@ -125,9 +125,9 @@ else if (_sbomError is { Length: > 0 })
     <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-4">@_sbomError</MudAlert>
 }
 
-@* Shared analysis panels (metadata / components / vulnerabilities). No Visualize link —
-   the /sca/visualize page targets cicd-scan's bom-vex.json, not per-image SBOMs. *@
-<SbomAnalysis Sbom="_sbom" />
+@* Shared analysis panels (metadata / components / vulnerabilities / dependencies).
+   Visualize deep-links the graph view to this build+image's SBOM. *@
+<SbomAnalysis Sbom="_sbom" VisualizeHref="@VisualizeHref()" />
 
 @code {
     private const string _jobName = "cicd-aspire-publish";
@@ -219,6 +219,12 @@ else if (_sbomError is { Length: > 0 })
 
     private string RowClassFunc(Build b, int rowNumber) =>
         _selectedBuild?.Number == b.Number ? "sca-row-selected" : string.Empty;
+
+    // Deep-link to the graph view for the selected build + image (only once an image is loaded).
+    private string? VisualizeHref()
+        => _selectedBuild is { } b && _selectedImage is { } img
+            ? $"/sca/visualize/aspire/{b.Number}/{ResourceName(img)}"
+            : null;
 
     // "image-apiservice.json" → "apiservice"
     private static string ResourceName(JenkinsBuildArtifact a)

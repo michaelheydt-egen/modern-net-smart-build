@@ -1,4 +1,5 @@
 @page "/sca/visualize/{Number:int}"
+@page "/sca/visualize/aspire/{Number:int}/{Image}"
 @inject IBuildStore Store
 @inject NavigationManager Nav
 @inject IJSRuntime JS
@@ -8,11 +9,11 @@
 
 <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4">
     <MudIconButton Icon="@Icons.Material.Filled.ArrowBack"
-                   OnClick="@(() => Nav.NavigateTo("/sca/sbom"))"
+                   OnClick="@(() => Nav.NavigateTo(IsAspire ? "/sca/aspire-sbom" : "/sca/sbom"))"
                    aria-label="Back to SBOM viewer" />
     <MudText Typo="Typo.h4">Visualize SBOM</MudText>
     <MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-secondary); font-family: ui-monospace, monospace;">
-        @_jobName · build #@Number
+        @_jobName · build #@Number@(IsAspire ? $" · {Image}" : "")
     </MudText>
     <MudSpacer />
 </MudStack>
@@ -25,7 +26,7 @@
     <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2">
         <MudIcon Icon="@(IsGraphView ? Icons.Material.Filled.Hub : Icons.Material.Filled.DataObject)"
                  Color="Color.Primary" />
-        <MudText Typo="Typo.h6">@(IsGraphView ? "Dependency graph" : "bom-vex.json")</MudText>
+        <MudText Typo="Typo.h6">@(IsGraphView ? "Dependency graph" : _artifactName)</MudText>
         @if (_sizeBytes > 0 && !IsGraphView)
         {
             <MudText Typo="Typo.body2" Style="color: var(--mud-palette-text-secondary);">
@@ -75,7 +76,7 @@
     else if (_tooLarge && !IsGraphView)
     {
         <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
-            bom-vex.json is @FormatSize(_sizeBytes); too large for inline rendering
+            @_artifactName is @FormatSize(_sizeBytes); too large for inline rendering
             (cap @FormatSize(MaxPreviewBytes)). Switch to <strong>Graph</strong> view —
             it's not size-bound and the structured analysis works on larger SBOMs.
         </MudAlert>
@@ -524,12 +525,20 @@
 
 @code {
     public const long MaxPreviewBytes = 10L * 1024 * 1024;
-    // The SBOM (bom-vex.json) is produced by the dedicated cicd-scan job, not cicd-build.
-    private const string _jobName  = "cicd-scan";
     private const string JsonView  = "json";
     private const string GraphView = "graph";
 
     [Parameter] public int Number { get; set; }
+
+    /// <summary>Set (via the /sca/visualize/aspire/{Number}/{Image} route) to visualize an Aspire
+    /// per-image SBOM instead of cicd-scan's bom-vex.json.</summary>
+    [Parameter] public string? Image { get; set; }
+
+    private bool IsAspire => !string.IsNullOrEmpty(Image);
+    // Source of the SBOM bytes: the dedicated cicd-scan bom-vex.json, or an Aspire build's per-image SBOM.
+    private string _jobName      => IsAspire ? "cicd-aspire-publish" : "cicd-scan";
+    private string _artifactPath => IsAspire ? $"_meta/image-{Image}.json" : "bom-vex.json";
+    private string _artifactName => IsAspire ? $"image-{Image}.json" : "bom-vex.json";
 
     // --- Shared state ---
     private bool _loading;
@@ -537,7 +546,7 @@
     private byte[]? _bytes;
     private long _sizeBytes;
     private bool _tooLarge;
-    private int _lastLoadedNumber;
+    private string? _lastLoadedKey;
     // Graph is the default — that's the analysis surface most users come here for.
     // Raw JSON is still one click away via the toggle in the panel header.
     private string _view = GraphView;
@@ -590,10 +599,11 @@
 
     protected override async Task OnParametersSetAsync()
     {
-        if (Number != _lastLoadedNumber)
+        var loadKey = $"{_jobName}#{Number}/{_artifactPath}";
+        if (loadKey != _lastLoadedKey)
         {
-            _lastLoadedNumber = Number;
-            // Different build → invalidate everything graph-related.
+            _lastLoadedKey = loadKey;
+            // Different build / image → invalidate everything graph-related.
             _doc = null;
             _graph = null;
             _graphJson = null;
@@ -630,7 +640,7 @@
 
         try
         {
-            var bytes = await Store.GetArtifactBytesAsync(_jobName, Number, "bom-vex.json");
+            var bytes = await Store.GetArtifactBytesAsync(_jobName, Number, _artifactPath);
             _bytes = bytes;
             _sizeBytes = bytes.LongLength;
             if (bytes.LongLength > MaxPreviewBytes)
@@ -983,12 +993,14 @@
         _dotNetRef?.Dispose();
     }
 
-    private static string ResolveError(Exception ex)
+    private string ResolveError(Exception ex)
     {
         if (ex is HttpRequestException hre && hre.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
-            return "This build did not archive bom-vex.json. Re-run cicd-scan " +
-                   "(Trivy SBOM stage generates the file) and try again.";
+            return $"This build did not archive {_artifactName}. " +
+                   (IsAspire
+                       ? "Re-run cicd-aspire-publish (a build after the SBOM-archive change) and try again."
+                       : "Re-run cicd-scan (Trivy SBOM stage generates the file) and try again.");
         }
         return ex.Message;
     }
