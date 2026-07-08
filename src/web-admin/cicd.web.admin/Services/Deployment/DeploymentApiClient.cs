@@ -95,6 +95,8 @@ public sealed class DeploymentApiClient
         => PostJsonNoBodyAsync($"api/deployment/aspire-runs/{runId}/approve", new ApproveAspireRunRequest("ui"), ct);
     public Task RejectAspireRunAsync(Guid runId, string? reason = null, CancellationToken ct = default)
         => PostJsonNoBodyAsync($"api/deployment/aspire-runs/{runId}/reject", new RejectAspireRunRequest("ui", reason), ct);
+    public Task<AspireAppStatusDto?> GetAspireAppStatusAsync(Guid id, CancellationToken ct = default)
+        => _http.GetFromJsonAsync<AspireAppStatusDto>($"api/deployment/aspire-apps/{id}/status", Json, ct);
     public async Task<IReadOnlyList<AspireApplicationRunDto>> ListAspireRunsAsync(Guid? applicationId = null, CancellationToken ct = default)
     {
         var url = applicationId is { } a ? $"api/deployment/aspire-runs?applicationId={a}" : "api/deployment/aspire-runs";

@@ -24,6 +24,7 @@ public sealed class AspireApplicationRunExecutor
         AspireApplicationRunRequested evt,
         IAspireApplicationRunRepository runs,
         IAspirateRunner aspirate,
+        IAspireClusterStatusReader clusterStatus,
         IUnitOfWork uow,
         TimeProvider clock,
         ILogger<AspireApplicationRunExecutor> logger,
@@ -47,10 +48,37 @@ public sealed class AspireApplicationRunExecutor
         }
 
         var now = clock.GetUtcNow();
-        if (result.Success) run.Succeed(result.Log, now);
-        else run.Fail(result.FailureReason ?? "aspirate deploy failed.", result.Log, now);
+        if (result.Success)
+        {
+            run.Succeed(result.Log, await SnapshotImagesAsync(clusterStatus, run, logger, ct).ConfigureAwait(false), now);
+        }
+        else
+        {
+            run.Fail(result.FailureReason ?? "aspirate deploy failed.", result.Log, now);
+        }
 
         await uow.SaveChangesAsync(ct).ConfigureAwait(false);
         logger.LogInformation("[aspire] Run {Run} -> {Status}.", run.Id, run.Status);
+    }
+
+    /// <summary>Reads back the just-applied workloads' images so the run records what it put on the cluster
+    /// (the drift baseline). Best-effort — a read failure must not fail an otherwise-successful deploy.</summary>
+    private static async Task<IReadOnlyList<DeployedImage>> SnapshotImagesAsync(
+        IAspireClusterStatusReader clusterStatus, AspireApplicationRun run, ILogger logger, CancellationToken ct)
+    {
+        try
+        {
+            var cluster = await clusterStatus.GetAsync(run.KubeContext, run.Namespace, ct).ConfigureAwait(false);
+            if (!cluster.Reachable) return Array.Empty<DeployedImage>();
+            return cluster.Workloads
+                .Where(w => !string.IsNullOrWhiteSpace(w.Image))
+                .Select(w => new DeployedImage(w.Name, w.Image!))
+                .ToArray();
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "[aspire] Run {Run} deployed OK but image snapshot failed.", run.Id);
+            return Array.Empty<DeployedImage>();
+        }
     }
 }

@@ -154,7 +154,8 @@ internal sealed class EfAspireApplicationRunReader : IAspireApplicationRunReader
 
     private static AspireApplicationRunDto ToDto(Domain.AspireApps.Runs.AspireApplicationRun r) => new(
         r.Id, r.ApplicationId, r.ApplicationName, r.EnvironmentName, r.KubeContext, r.Namespace, r.ManifestSource, r.Version,
-        (AspireRunStatusDto)(int)r.Status, r.TriggeredBy, r.Log, r.FailureReason, r.RequestedAtUtc, r.CompletedAtUtc, r.DecisionBy);
+        (AspireRunStatusDto)(int)r.Status, r.TriggeredBy, r.Log, r.FailureReason, r.RequestedAtUtc, r.CompletedAtUtc, r.DecisionBy,
+        r.DeployedImages.Select(i => new DeployedImageDto(i.Workload, i.Image)).ToList());
 
     public async Task<IReadOnlyList<AspireApplicationRunDto>> ListAsync(Guid? applicationId = null, CancellationToken ct = default)
     {

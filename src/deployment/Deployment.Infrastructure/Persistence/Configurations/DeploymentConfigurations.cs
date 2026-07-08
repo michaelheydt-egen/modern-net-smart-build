@@ -202,6 +202,10 @@ public sealed class AspireApplicationRunConfiguration : IEntityTypeConfiguration
         b.Property(r => r.Log).HasColumnType("nvarchar(max)");
         b.Property(r => r.FailureReason).HasMaxLength(2000);
         b.Property(r => r.DecisionBy).HasMaxLength(200);
+        b.Property(r => r.DeployedImages)
+            .HasConversion(Json.Converter<DeployedImage>(), Json.Comparer<DeployedImage>())
+            .HasColumnType("nvarchar(max)")
+            .HasDefaultValue(Array.Empty<DeployedImage>());
         b.Property(r => r.RequestedAtUtc).IsRequired();
         b.Property(r => r.CompletedAtUtc);
         b.HasIndex(r => r.ApplicationId);

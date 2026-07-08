@@ -93,6 +93,7 @@ public static class DependencyInjection
         services.AddOptions<KubernetesOptions>().Bind(configuration.GetSection(KubernetesOptions.SectionName));
         services.AddSingleton<IKubeClientFactory, KubeClientFactory>();
         services.AddSingleton<IKubernetesDeployer, KubernetesDeployer>();
+        services.AddScoped<Application.Features.AspireApps.IAspireClusterStatusReader, AspireClusterStatusReader>();
 
         return services;
     }

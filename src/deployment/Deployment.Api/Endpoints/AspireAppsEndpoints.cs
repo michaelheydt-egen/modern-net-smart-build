@@ -60,6 +60,9 @@ public static class AspireAppsEndpoints
             return result.RunId is { } ? Results.Accepted($"/api/deployment/aspire-runs/{result.RunId}", result) : Results.Ok(result);
         });
 
+        g.MapGet("{id:guid}/status", async (Guid id, GetAspireAppStatusHandler h, CancellationToken ct) =>
+            await h.HandleAsync(new GetAspireAppStatusQuery(id), ct) is { } d ? Results.Ok(d) : Results.NotFound());
+
         return app;
     }
 

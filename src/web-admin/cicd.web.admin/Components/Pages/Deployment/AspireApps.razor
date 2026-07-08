@@ -66,6 +66,7 @@
                 </MudTd>
                 <MudTd>
                     <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.RocketLaunch" OnClick="@(() => DeployAsync(context))" Disabled="_busy">Deploy</MudButton>
+                    <MudTooltip Text="Live status — cluster health + drift for this app"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.MonitorHeart" OnClick="@(() => OpenStatusAsync(context))" Disabled="_busy" /></MudTooltip>
                     <MudTooltip Text="Promote this app's current manifest to another environment"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.MoveUp" OnClick="@(() => OpenPromote(context))" Disabled="_busy" /></MudTooltip>
                     <MudTooltip Text="Edit (name, environment, manifest source, …)"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Edit" OnClick="@(() => OpenEdit(context))" /></MudTooltip>
                     <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Delete" Color="Color.Error" OnClick="@(() => DeleteAsync(context))" />
@@ -163,6 +164,85 @@
     </DialogActions>
 </MudDialog>
 
+<MudDialog @bind-Visible="_statusShow" Options="_statusDlg">
+    <TitleContent>
+        <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+            <MudIcon Icon="@Icons.Material.Filled.MonitorHeart" />
+            <MudText Typo="Typo.h6">@(_status?.ApplicationName ?? "Status")</MudText>
+            @if (_status is not null && _status.Reachable)
+            { <MudChip T="string" Size="Size.Small" Color="@HealthColor(_status.OverallHealth)" Variant="Variant.Filled">@_status.OverallHealth</MudChip> }
+        </MudStack>
+    </TitleContent>
+    <DialogContent>
+        @if (_statusLoading) { <MudProgressLinear Indeterminate="true" Class="my-2" /> }
+        else if (_status is null) { <MudText Typo="Typo.body2">No status.</MudText> }
+        else
+        {
+            <MudText Typo="Typo.body2" Class="mb-2" Style="color: var(--mud-palette-text-secondary);">
+                @_status.EnvironmentName · @(_status.KubeContext ?? "—")/@(_status.Namespace ?? "—")
+            </MudText>
+
+            @if (!_status.Reachable)
+            {
+                <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Class="my-2">@(_status.Error ?? "Cluster unreachable.")</MudAlert>
+            }
+            else if (!string.IsNullOrEmpty(_status.Error))
+            {
+                <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="my-2">@_status.Error</MudAlert>
+            }
+
+            @if (_status.HasUndeployedChanges)
+            {
+                <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Icon="@Icons.Material.Filled.SyncProblem" Class="my-2">
+                    Undeployed changes — the app's current manifest (@(_status.CurrentVersion ?? "—")) differs from the last deploy (@(_status.LastDeployedVersion ?? "—")). Deploy to roll them out.
+                </MudAlert>
+            }
+
+            @if (_status.HasImageDrift)
+            {
+                <MudAlert Severity="Severity.Error" Variant="Variant.Filled" Icon="@Icons.Material.Filled.Warning" Class="my-2">
+                    Image drift — a live workload is running a different image than this app last deployed (see the flagged rows below). The cluster was changed out of band; redeploy to reconcile.
+                </MudAlert>
+            }
+
+            <MudText Typo="Typo.caption" Style="color: var(--mud-palette-text-secondary);">
+                Last deployed: @(_status.LastDeployedAtUtc is { } t ? t.LocalDateTime.ToString("g") : "never")
+                @(_status.LastDeployedVersion is { Length: > 0 } v ? $" · {v}" : "")
+            </MudText>
+
+            @if (_status.Reachable && _status.Workloads.Count > 0)
+            {
+                <MudTable Items="@_status.Workloads" Dense="true" Hover="true" T="WorkloadStatusDto" Class="mt-3">
+                    <HeaderContent><MudTh Style="width:6rem;">Health</MudTh><MudTh>Workload</MudTh><MudTh>Image</MudTh><MudTh Style="width:6rem;">Ready</MudTh><MudTh Style="width:6rem;">Restarts</MudTh></HeaderContent>
+                    <RowTemplate>
+                        <MudTd><MudChip T="string" Size="Size.Small" Color="@HealthColor(context.Health)" Variant="Variant.Filled">@context.Health</MudChip></MudTd>
+                        <MudTd>@context.Name</MudTd>
+                        <MudTd Style="font-family: ui-monospace, monospace; font-size:0.75em; max-width:22rem;">
+                            <div style="overflow:hidden; text-overflow:ellipsis;">@(context.Image ?? "—")</div>
+                            @if (context.Drifted)
+                            {
+                                <MudTooltip Text="@($"Expected (last deployed): {context.ExpectedImage}")">
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Text" Icon="@Icons.Material.Filled.Warning">drift</MudChip>
+                                </MudTooltip>
+                            }
+                        </MudTd>
+                        <MudTd>@context.ReadyReplicas / @context.DesiredReplicas</MudTd>
+                        <MudTd>@context.Pods.Sum(p => p.Restarts)</MudTd>
+                    </RowTemplate>
+                </MudTable>
+            }
+            else if (_status.Reachable)
+            {
+                <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="mt-3">No workloads found in this namespace — the app may not be deployed yet.</MudAlert>
+            }
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton StartIcon="@Icons.Material.Filled.Refresh" OnClick="@(() => RefreshStatusAsync())" Disabled="_statusLoading">Refresh</MudButton>
+        <MudButton OnClick="@(() => _statusShow = false)">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
 <MudDialog @bind-Visible="_logShow" Options="_logDlg">
     <TitleContent>@(_logRun is null ? "Run" : $"{_logRun.ApplicationName} — {_logRun.Status}")</TitleContent>
     <DialogContent>
@@ -200,6 +280,11 @@
     private static readonly DialogOptions _promoteDlg = new() { MaxWidth = MaxWidth.Small, FullWidth = true };
     private AspireApplicationDto? _promoteApp;
     private Guid? _promoteEnvId;
+
+    private bool _statusShow, _statusLoading;
+    private static readonly DialogOptions _statusDlg = new() { MaxWidth = MaxWidth.Large, FullWidth = true };
+    private Guid _statusAppId;
+    private AspireAppStatusDto? _status;
 
     private bool _editShow;
     private static readonly DialogOptions _editDlg = new() { MaxWidth = MaxWidth.Medium, FullWidth = true };
@@ -325,6 +410,30 @@
         catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
         finally { _busy = false; }
     }
+
+    private async Task OpenStatusAsync(AspireApplicationDto app)
+    {
+        _statusAppId = app.Id;
+        _status = null;
+        _statusShow = true;
+        await RefreshStatusAsync();
+    }
+
+    private async Task RefreshStatusAsync()
+    {
+        _statusLoading = true; StateHasChanged();
+        try { _status = await Api.GetAspireAppStatusAsync(_statusAppId); }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        finally { _statusLoading = false; StateHasChanged(); }
+    }
+
+    private static Color HealthColor(WorkloadHealthDto h) => h switch
+    {
+        WorkloadHealthDto.Healthy => Color.Success,
+        WorkloadHealthDto.Degraded => Color.Warning,
+        WorkloadHealthDto.Down => Color.Error,
+        _ => Color.Default,
+    };
 
     private void ShowLog(AspireApplicationRunDto run) { _logRun = run; _logShow = true; }
 

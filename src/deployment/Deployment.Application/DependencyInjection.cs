@@ -63,6 +63,7 @@ public static class DependencyInjection
         services.AddScoped<RejectAspireRunHandler>();
         services.AddScoped<ListAspireRunsHandler>();
         services.AddScoped<GetAspireRunByIdHandler>();
+        services.AddScoped<GetAspireAppStatusHandler>();
 
         return services;
     }

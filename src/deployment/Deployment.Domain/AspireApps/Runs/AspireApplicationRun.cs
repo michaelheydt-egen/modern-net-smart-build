@@ -32,6 +32,9 @@ public sealed class AspireApplicationRun : AggregateRoot<Guid>
     public DateTimeOffset RequestedAtUtc { get; private set; }
     public DateTimeOffset? CompletedAtUtc { get; private set; }
 
+    /// <summary>Images this run put on the cluster (workload → image ref), snapshotted on success. Empty until then.</summary>
+    public IReadOnlyList<DeployedImage> DeployedImages { get; private set; }
+
     private AspireApplicationRun()
     {
         ApplicationName = string.Empty;
@@ -40,6 +43,7 @@ public sealed class AspireApplicationRun : AggregateRoot<Guid>
         Namespace = string.Empty;
         ManifestSource = string.Empty;
         TriggeredBy = string.Empty;
+        DeployedImages = Array.Empty<DeployedImage>();
     }
 
     public AspireApplicationRun(
@@ -60,6 +64,7 @@ public sealed class AspireApplicationRun : AggregateRoot<Guid>
         Version = string.IsNullOrWhiteSpace(version) ? null : version.Trim();
         TriggeredBy = string.IsNullOrWhiteSpace(triggeredBy) ? "manual" : triggeredBy.Trim();
         RequestedAtUtc = requestedAtUtc;
+        DeployedImages = Array.Empty<DeployedImage>();
 
         // A run targeting a protected environment parks for approval and does NOT raise the requested
         // event, so the executor won't apply it until Approve() transitions it to Pending.
@@ -95,11 +100,13 @@ public sealed class AspireApplicationRun : AggregateRoot<Guid>
 
     public void Start() { if (Status == DeploymentRunStatus.Pending) Status = DeploymentRunStatus.Running; }
 
-    public void Succeed(string? log, DateTimeOffset completedAtUtc)
+    public void Succeed(string? log, IReadOnlyList<DeployedImage>? deployedImages, DateTimeOffset completedAtUtc)
     {
         if (Status is DeploymentRunStatus.Succeeded or DeploymentRunStatus.Failed) return;
         Status = DeploymentRunStatus.Succeeded;
         Log = Trim(log);
+        if (deployedImages is { Count: > 0 })
+            DeployedImages = deployedImages.Where(i => !string.IsNullOrWhiteSpace(i.Image)).ToArray();
         CompletedAtUtc = completedAtUtc;
         RaiseEvent(new AspireApplicationRunSucceeded(Id, ApplicationId, ApplicationName, Namespace, completedAtUtc));
     }
