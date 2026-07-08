@@ -66,6 +66,7 @@
                 </MudTd>
                 <MudTd>
                     <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.RocketLaunch" OnClick="@(() => DeployAsync(context))" Disabled="_busy">Deploy</MudButton>
+                    <MudTooltip Text="Promote this app's current manifest to another environment"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.MoveUp" OnClick="@(() => OpenPromote(context))" Disabled="_busy" /></MudTooltip>
                     <MudTooltip Text="Edit (name, environment, manifest source, …)"><MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Edit" OnClick="@(() => OpenEdit(context))" /></MudTooltip>
                     <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Delete" Color="Color.Error" OnClick="@(() => DeleteAsync(context))" />
                 </MudTd>
@@ -104,6 +105,27 @@
         </MudTable>
     }
 </MudPaper>
+
+<MudDialog @bind-Visible="_promoteShow" Options="_promoteDlg">
+    <TitleContent>Promote @_promoteApp?.Name</TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-2" Style="color: var(--mud-palette-text-secondary);">
+            Deploys this app's current manifest (@(_promoteApp?.Version ?? "—")) to another Kubernetes environment. The images are digest-pinned, so it runs the exact same artifacts.
+        </MudText>
+        @if (_k8sEnvs is { Count: 0 })
+        {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">No Kubernetes environments exist — add one under Environments first.</MudAlert>
+        }
+        <MudSelect T="Guid?" @bind-Value="_promoteEnvId" Label="Target environment" Required="true">
+            @foreach (var e in _k8sEnvs ?? new List<EnvironmentDto>())
+            { <MudSelectItem T="Guid?" Value="@e.Id">@e.Name (@e.KubernetesContext/@e.KubernetesNamespace)</MudSelectItem> }
+        </MudSelect>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _promoteShow = false)">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="ConfirmPromoteAsync" Disabled="_busy">Promote</MudButton>
+    </DialogActions>
+</MudDialog>
 
 <MudDialog @bind-Visible="_editShow" Options="_editDlg">
     <TitleContent>Edit @_editName</TitleContent>
@@ -165,6 +187,11 @@
     private AspireApplicationRunDto? _logRun;
     private static readonly DialogOptions _logDlg = new() { MaxWidth = MaxWidth.Large, FullWidth = true };
 
+    private bool _promoteShow;
+    private static readonly DialogOptions _promoteDlg = new() { MaxWidth = MaxWidth.Small, FullWidth = true };
+    private AspireApplicationDto? _promoteApp;
+    private Guid? _promoteEnvId;
+
     private bool _editShow;
     private static readonly DialogOptions _editDlg = new() { MaxWidth = MaxWidth.Medium, FullWidth = true };
     private Guid _editId;
@@ -220,6 +247,31 @@
     {
         try { await Api.DeleteAspireAppAsync(app.Id); await LoadAsync(); }
         catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+    }
+
+    private void OpenPromote(AspireApplicationDto app)
+    {
+        _promoteApp = app;
+        _promoteEnvId = null;
+        _promoteShow = true;
+    }
+
+    private async Task ConfirmPromoteAsync()
+    {
+        if (_promoteApp is not { } app) return;
+        if (_promoteEnvId is not { } envId) { Snackbar.Add("Pick a target environment.", Severity.Warning); return; }
+        _busy = true;
+        try
+        {
+            var r = await Api.PromoteAspireAppAsync(app.Id, envId);
+            var envName = _k8sEnvs?.FirstOrDefault(e => e.Id == envId)?.Name ?? "target";
+            Snackbar.Add(r.Outcome == "requested" ? $"Promotion of '{app.Name}' to {envName} queued." : $"Promote: {r.Outcome}",
+                r.Outcome == "requested" ? Severity.Info : Severity.Warning);
+            _promoteShow = false;
+            await LoadAsync();
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        finally { _busy = false; }
     }
 
     private void OpenEdit(AspireApplicationDto app)

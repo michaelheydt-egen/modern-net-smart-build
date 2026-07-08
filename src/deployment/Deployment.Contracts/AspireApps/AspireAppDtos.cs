@@ -23,6 +23,9 @@ public sealed record TriggerAspireDeploymentRequest(string? TriggeredBy);
 /// <summary>Roll an Aspire app back to a previous succeeded run's manifest/version.</summary>
 public sealed record RollbackAspireDeploymentRequest(Guid TargetRunId, string? TriggeredBy);
 
+/// <summary>Promote an Aspire app's current manifest to a different Kubernetes environment.</summary>
+public sealed record PromoteAspireDeploymentRequest(Guid TargetEnvironmentId, string? TriggeredBy);
+
 /// <summary>Toggle whether a CI publish of this app auto-triggers a deployment.</summary>
 public sealed record SetAspireAutoDeployRequest(bool AutoDeploy);
 

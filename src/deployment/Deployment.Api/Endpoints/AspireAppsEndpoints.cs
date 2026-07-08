@@ -54,6 +54,12 @@ public static class AspireAppsEndpoints
             return result.RunId is { } ? Results.Accepted($"/api/deployment/aspire-runs/{result.RunId}", result) : Results.Ok(result);
         });
 
+        g.MapPost("{id:guid}/promote", async (Guid id, PromoteAspireDeploymentRequest body, PromoteAspireDeploymentHandler h, CancellationToken ct) =>
+        {
+            var result = await h.HandleAsync(new PromoteAspireDeploymentCommand(id, body.TargetEnvironmentId, body.TriggeredBy), ct);
+            return result.RunId is { } ? Results.Accepted($"/api/deployment/aspire-runs/{result.RunId}", result) : Results.Ok(result);
+        });
+
         return app;
     }
 
