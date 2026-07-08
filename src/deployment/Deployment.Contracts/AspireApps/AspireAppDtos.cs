@@ -20,6 +20,9 @@ public sealed record UpdateAspireApplicationRequest(string Name, string? Descrip
 /// <summary>Trigger an Aspire-app deployment.</summary>
 public sealed record TriggerAspireDeploymentRequest(string? TriggeredBy);
 
+/// <summary>Roll an Aspire app back to a previous succeeded run's manifest/version.</summary>
+public sealed record RollbackAspireDeploymentRequest(Guid TargetRunId, string? TriggeredBy);
+
 /// <summary>Toggle whether a CI publish of this app auto-triggers a deployment.</summary>
 public sealed record SetAspireAutoDeployRequest(bool AutoDeploy);
 

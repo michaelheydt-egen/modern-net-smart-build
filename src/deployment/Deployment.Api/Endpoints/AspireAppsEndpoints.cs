@@ -48,6 +48,12 @@ public static class AspireAppsEndpoints
             catch (InvalidOperationException ex) { return Results.Problem(title: "Not found", detail: ex.Message, statusCode: 404); }
         });
 
+        g.MapPost("{id:guid}/rollback", async (Guid id, RollbackAspireDeploymentRequest body, RollbackAspireDeploymentHandler h, CancellationToken ct) =>
+        {
+            var result = await h.HandleAsync(new RollbackAspireDeploymentCommand(id, body.TargetRunId, body.TriggeredBy), ct);
+            return result.RunId is { } ? Results.Accepted($"/api/deployment/aspire-runs/{result.RunId}", result) : Results.Ok(result);
+        });
+
         return app;
     }
 

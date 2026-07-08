@@ -91,7 +91,15 @@
                 <MudTd>@context.EnvironmentName (@context.Namespace)</MudTd>
                 <MudTd>@context.TriggeredBy</MudTd>
                 <MudTd>@context.RequestedAtUtc.LocalDateTime.ToString("g")</MudTd>
-                <MudTd><MudButton Size="Size.Small" Variant="Variant.Text" OnClick="@(() => ShowLog(context))">Log</MudButton></MudTd>
+                <MudTd>
+                    <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="@(() => ShowLog(context))">Log</MudButton>
+                    @if (context.Status == AspireRunStatusDto.Succeeded)
+                    {
+                        <MudTooltip Text="Roll the app back to this deploy's manifest">
+                            <MudIconButton Icon="@Icons.Material.Filled.Restore" Size="Size.Small" Disabled="_busy" OnClick="@(() => RollbackAsync(context))" />
+                        </MudTooltip>
+                    }
+                </MudTd>
             </RowTemplate>
         </MudTable>
     }
@@ -258,6 +266,21 @@
     }
 
     private void ShowLog(AspireApplicationRunDto run) { _logRun = run; _logShow = true; }
+
+    private async Task RollbackAsync(AspireApplicationRunDto run)
+    {
+        _busy = true;
+        try
+        {
+            var r = await Api.RollbackAspireAppAsync(run.ApplicationId, run.Id);
+            var label = run.Version ?? run.Id.ToString("N")[..8];
+            Snackbar.Add(r.Outcome == "requested" ? $"Rollback of '{run.ApplicationName}' to {label} queued." : $"Rollback: {r.Outcome}",
+                r.Outcome == "requested" ? Severity.Info : Severity.Warning);
+            await LoadAsync();
+        }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        finally { _busy = false; }
+    }
 
     private static Color StatusColor(AspireRunStatusDto s) => s switch
     {

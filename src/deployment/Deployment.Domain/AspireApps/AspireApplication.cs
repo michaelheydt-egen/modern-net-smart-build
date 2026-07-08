@@ -110,6 +110,18 @@ public sealed class AspireApplication : AggregateRoot<Guid>
         return true;
     }
 
+    /// <summary>
+    /// Point the app's current manifest/version at a previous deploy (rollback). Makes the rollback
+    /// stick: the app record — and any subsequent manual/auto deploy — matches what's now running.
+    /// </summary>
+    public void RollbackTo(string manifestSource, string? version, DateTimeOffset occurredAtUtc)
+    {
+        ManifestSource = Require(manifestSource, nameof(manifestSource));
+        Version = Clean(version);
+        UpdatedAtUtc = occurredAtUtc;
+        RaiseEvent(new AspireApplicationUpdated(Id, Name, occurredAtUtc));
+    }
+
     private static string Require(string value, string name)
         => string.IsNullOrWhiteSpace(value) ? throw new ArgumentException($"{name} cannot be empty.", name) : value.Trim();
     private static string? Clean(string? v) => string.IsNullOrWhiteSpace(v) ? null : v.Trim();
