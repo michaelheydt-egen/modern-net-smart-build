@@ -71,6 +71,23 @@ internal sealed partial class AspirateRunner : IAspirateRunner
             if (!string.IsNullOrWhiteSpace(opts.PullRegistry))
                 await RewriteImageHostAsync(outputDir, opts.PullRegistry.Trim(), log, cancellationToken).ConfigureAwait(false);
 
+            // 2a) Pin every resource to the requested namespace and ensure it exists. aspirate applies the
+            // kustomize output as-is (its manifests bake in their own namespace — often "default"), so without
+            // this the deploy ignores request.Namespace, breaking per-environment and preview isolation.
+            if (!string.IsNullOrWhiteSpace(request.Namespace))
+            {
+                SetKustomizationNamespace(outputDir, request.Namespace, log);
+                try
+                {
+                    await EnsureNamespaceAsync(request.KubeContext, request.Namespace, log, cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    log.AppendLine($"namespace provisioning failed: {ex.Message}");
+                    return new AspirateDeployResult(false, log.ToString(), $"could not ensure namespace '{request.Namespace}': {ex.Message}");
+                }
+            }
+
             // 2b) Provision the Nexus image-pull secret so the aspirate pods can authenticate to the registry.
             if (opts.EnsurePullSecret)
             {
@@ -281,6 +298,33 @@ internal sealed partial class AspirateRunner : IAspirateRunner
 
         log.AppendLine($"ensured image-pull secret '{name}' for {host} in namespace '{ns}' (added to default ServiceAccount).");
     }
+
+    /// <summary>Ensures the target namespace exists (server-side apply, idempotent) so aspirate's namespaced
+    /// resources land cleanly.</summary>
+    private async Task EnsureNamespaceAsync(string context, string ns, StringBuilder log, CancellationToken ct)
+    {
+        using var client = _kube.Create(context);
+        await ApplyIgnoringConflictAsync(() => client.CoreV1.PatchNamespaceAsync(
+            Apply(new V1Namespace { ApiVersion = "v1", Kind = "Namespace", Metadata = new V1ObjectMeta { Name = ns } }),
+            ns, fieldManager: FieldManager, force: true, cancellationToken: ct)).ConfigureAwait(false);
+        log.AppendLine($"ensured namespace '{ns}'.");
+    }
+
+    /// <summary>Sets the root kustomization's top-level <c>namespace:</c> so Kustomize applies every resource
+    /// into <paramref name="ns"/>, overriding whatever the generated manifests baked in. Idempotent (replaces
+    /// any existing top-level directive).</summary>
+    private static void SetKustomizationNamespace(string outputPath, string ns, StringBuilder log)
+    {
+        var kustomization = Path.Combine(outputPath, "kustomization.yaml");
+        if (!File.Exists(kustomization)) return;
+        var text = File.ReadAllText(kustomization);
+        var body = KustomizationNamespaceLine().Replace(text, string.Empty).TrimStart('\r', '\n');
+        File.WriteAllText(kustomization, $"namespace: {ns}\n{body}");
+        log.AppendLine($"pinned kustomization namespace -> {ns}");
+    }
+
+    [GeneratedRegex(@"(?m)^namespace:[ \t]*\S.*\r?\n?")]
+    private static partial Regex KustomizationNamespaceLine();
 
     private static V1Patch Apply(object body) => new(body, V1Patch.PatchType.ApplyPatch);
 
