@@ -2,10 +2,12 @@
 # and Aspire/Cicd.Aspire.ServiceDefaults).
 #   docker build --file src/deployment/Deployment.Api/Dockerfile -t deployment-api:latest ./src
 #
-# Note: this image runs the API + the CI->deploy handoff consumer. Actually applying an
-# Aspire app to a cluster (aspirate apply) additionally needs the `aspirate` CLI + a reachable
-# kube context inside the container — extend this image (install the tool + mount a kubeconfig)
-# or run the service on a host that has them.
+# The image bundles the `aspirate` CLI + `kubectl` so the service can run `aspirate apply`
+# to a cluster. It still needs, at runtime: a kubeconfig mounted in (KUBECONFIG /
+# Deployment:Aspirate:Kubeconfig) whose API-server address is reachable FROM the container,
+# and — for an insecure/HTTP Nexus — the cluster nodes configured for it (see
+# samples/aspire-sample/kind-nexus-setup.sh). For kind, connect this container to the kind
+# network and point the kubeconfig at the internal control-plane address.
 
 # --- build stage ---
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
@@ -30,14 +32,28 @@ COPY Aspire/Cicd.Aspire.ServiceDefaults/ Aspire/Cicd.Aspire.ServiceDefaults/
 RUN dotnet publish deployment/Deployment.Api/Deployment.Api.csproj \
     -c Release -o /app/publish --no-restore
 
+# aspirate CLI (installed to a tool-path we copy into the runtime image).
+RUN dotnet tool install --tool-path /aspirate Aspirate
+
 # --- runtime stage ---
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
 
-# curl is needed by the HEALTHCHECK below; the aspnet base image doesn't include it.
+# curl for the HEALTHCHECK + the kubectl download; the aspnet base image doesn't include it.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
+
+# aspirate CLI + kubectl so `aspirate apply` can deploy to a cluster.
+# aspirate targets .NET 9; this image ships the .NET 10 runtime, so allow the tool to roll
+# forward across the major version. (No-op for Deployment.Api, which matches 10 exactly.)
+COPY --from=build /aspirate /opt/aspirate
+ENV PATH="/opt/aspirate:${PATH}" \
+    DOTNET_ROLL_FORWARD=Major
+RUN ARCH="$(dpkg --print-architecture)" \
+    && curl -fsSLo /usr/local/bin/kubectl \
+       "https://dl.k8s.io/release/$(curl -fsSL https://dl.k8s.io/release/stable.txt)/bin/linux/${ARCH}/kubectl" \
+    && chmod +x /usr/local/bin/kubectl
 
 COPY --from=build /app/publish .
 
