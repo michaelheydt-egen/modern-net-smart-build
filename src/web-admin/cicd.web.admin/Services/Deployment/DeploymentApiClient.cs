@@ -139,6 +139,13 @@ public sealed class DeploymentApiClient
     private static string ContextQuery(string? context)
         => string.IsNullOrWhiteSpace(context) ? "" : $"?context={Uri.EscapeDataString(context)}";
 
+    public Task RestartK8sDeploymentAsync(string ns, string name, string? context = null, CancellationToken ct = default)
+        => PostAsync($"api/deployment/k8s/namespaces/{Uri.EscapeDataString(ns)}/deployments/{Uri.EscapeDataString(name)}/restart{ContextQuery(context)}", ct);
+    public Task ScaleK8sDeploymentAsync(string ns, string name, int replicas, string? context = null, CancellationToken ct = default)
+        => PostJsonNoBodyAsync($"api/deployment/k8s/namespaces/{Uri.EscapeDataString(ns)}/deployments/{Uri.EscapeDataString(name)}/scale{ContextQuery(context)}", new ScaleDeploymentRequest(replicas), ct);
+    public Task DeleteK8sPodAsync(string ns, string pod, string? context = null, CancellationToken ct = default)
+        => DeleteAsync($"api/deployment/k8s/namespaces/{Uri.EscapeDataString(ns)}/pods/{Uri.EscapeDataString(pod)}{ContextQuery(context)}", ct);
+
     // ---- Plumbing ----
     private async Task PostAsync(string url, CancellationToken ct)
     { using var r = await _http.PostAsync(url, null, ct).ConfigureAwait(false); await EnsureOk(r, ct).ConfigureAwait(false); }

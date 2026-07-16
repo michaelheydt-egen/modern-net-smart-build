@@ -1,6 +1,7 @@
 @page "/kubernetes/cluster"
 @inject DeploymentApiClient Api
 @inject ISnackbar Snackbar
+@inject IDialogService DialogService
 @implements IDisposable
 
 <PageTitle>Kubernetes — Cluster</PageTitle>
@@ -70,25 +71,32 @@
                     else
                     {
                         <MudTable Items="@_detail.Workloads" Dense="true" Hover="true" T="WorkloadStatusDto" Class="mb-3">
-                            <HeaderContent><MudTh Style="width:5rem;">Health</MudTh><MudTh>Workload</MudTh><MudTh>Image</MudTh><MudTh Style="width:5rem;">Ready</MudTh><MudTh Style="width:5rem;">Restarts</MudTh></HeaderContent>
+                            <HeaderContent><MudTh Style="width:5rem;">Health</MudTh><MudTh>Workload</MudTh><MudTh>Image</MudTh><MudTh Style="width:5rem;">Ready</MudTh><MudTh Style="width:5rem;">Restarts</MudTh><MudTh Style="width:6rem;">Actions</MudTh></HeaderContent>
                             <RowTemplate>
                                 <MudTd><MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="@HealthColor(context.Health)">@context.Health</MudChip></MudTd>
                                 <MudTd>@context.Name</MudTd>
                                 <MudTd Style="font-family: ui-monospace, monospace; font-size:0.75em; max-width:20rem;"><div style="overflow:hidden; text-overflow:ellipsis;">@(context.Image ?? "—")</div></MudTd>
                                 <MudTd>@context.ReadyReplicas / @context.DesiredReplicas</MudTd>
                                 <MudTd>@context.Pods.Sum(p => p.Restarts)</MudTd>
+                                <MudTd>
+                                    <MudTooltip Text="Rolling restart"><MudIconButton Icon="@Icons.Material.Filled.RestartAlt" Size="Size.Small" Disabled="_busy" OnClick="@(() => RestartAsync(context.Name))" /></MudTooltip>
+                                    <MudTooltip Text="Scale replicas"><MudIconButton Icon="@Icons.Material.Filled.Tune" Size="Size.Small" Disabled="_busy" OnClick="@(() => OpenScale(context))" /></MudTooltip>
+                                </MudTd>
                             </RowTemplate>
                         </MudTable>
 
                         <MudText Typo="Typo.subtitle2">Pods</MudText>
                         <MudTable Items="@AllPods()" Dense="true" Hover="true" T="PodRow" Class="mb-3">
-                            <HeaderContent><MudTh>Pod</MudTh><MudTh Style="width:7rem;">Phase</MudTh><MudTh Style="width:5rem;">Restarts</MudTh><MudTh Style="width:5rem;">Ready</MudTh><MudTh Style="width:5rem;">Logs</MudTh></HeaderContent>
+                            <HeaderContent><MudTh>Pod</MudTh><MudTh Style="width:7rem;">Phase</MudTh><MudTh Style="width:5rem;">Restarts</MudTh><MudTh Style="width:5rem;">Ready</MudTh><MudTh Style="width:6rem;">Actions</MudTh></HeaderContent>
                             <RowTemplate>
                                 <MudTd Style="font-family: ui-monospace, monospace; font-size:0.8em;">@context.Pod.Name</MudTd>
                                 <MudTd><MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@PodPhaseColor(context.Pod.Phase)">@context.Pod.Phase</MudChip></MudTd>
                                 <MudTd>@context.Pod.Restarts</MudTd>
                                 <MudTd>@(context.Pod.Ready ? "✓" : "—")</MudTd>
-                                <MudTd><MudTooltip Text="View logs"><MudIconButton Icon="@Icons.Material.Filled.Article" Size="Size.Small" OnClick="@(() => OpenLogsAsync(context.Pod.Name))" /></MudTooltip></MudTd>
+                                <MudTd>
+                                    <MudTooltip Text="View logs"><MudIconButton Icon="@Icons.Material.Filled.Article" Size="Size.Small" OnClick="@(() => OpenLogsAsync(context.Pod.Name))" /></MudTooltip>
+                                    <MudTooltip Text="Delete pod"><MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small" Disabled="_busy" OnClick="@(() => DeletePodAsync(context.Pod.Name))" /></MudTooltip>
+                                </MudTd>
                             </RowTemplate>
                         </MudTable>
                     }
@@ -143,6 +151,17 @@
     </DialogActions>
 </MudDialog>
 
+<MudDialog @bind-Visible="_scaleShow" Options="_scaleDlg">
+    <TitleContent>Scale <span style="font-family: ui-monospace, monospace;">@_scaleName</span></TitleContent>
+    <DialogContent>
+        <MudNumericField @bind-Value="_scaleReplicas" Label="Replicas" Min="0" Max="50" Variant="Variant.Outlined" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _scaleShow = false)">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="ConfirmScaleAsync" Disabled="_busy">Scale</MudButton>
+    </DialogActions>
+</MudDialog>
+
 @code {
     public const int IntervalSec = 15;
 
@@ -159,9 +178,14 @@
     private CancellationTokenSource? _inflightCts;
     private Timer? _timer;
 
-    private bool _logShow, _logLoading;
+    private bool _logShow, _logLoading, _busy;
     private static readonly DialogOptions _logDlg = new() { MaxWidth = MaxWidth.Large, FullWidth = true };
     private string? _logPod, _logText;
+
+    private bool _scaleShow;
+    private static readonly DialogOptions _scaleDlg = new() { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true };
+    private string? _scaleName;
+    private int _scaleReplicas;
 
     private sealed record PodRow(string Workload, PodStatusDto Pod);
 
@@ -227,6 +251,43 @@
         try { _logText = (await Api.GetK8sPodLogAsync(_selectedNs, _logPod, tail: 500, context: _context))?.Log ?? "(no log)"; }
         catch (Exception ex) { _logText = ex.Message; }
         finally { _logLoading = false; StateHasChanged(); }
+    }
+
+    private async Task RestartAsync(string name)
+    {
+        if (_selectedNs is null) return;
+        var ok = await DialogService.ShowMessageBoxAsync(title: "Restart deployment",
+            markupMessage: new MarkupString($"Trigger a rolling restart of <strong>{name}</strong>?"),
+            yesText: "Restart", noText: null!, cancelText: "Cancel");
+        if (ok != true) return;
+        _busy = true; StateHasChanged();
+        try { await Api.RestartK8sDeploymentAsync(_selectedNs, name, _context); Snackbar.Add($"Restarting '{name}'.", Severity.Info); await LoadDetailAsync(CancellationToken.None); }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        finally { _busy = false; StateHasChanged(); }
+    }
+
+    private void OpenScale(WorkloadStatusDto w) { _scaleName = w.Name; _scaleReplicas = w.DesiredReplicas; _scaleShow = true; }
+
+    private async Task ConfirmScaleAsync()
+    {
+        if (_selectedNs is null || _scaleName is null) return;
+        _busy = true; StateHasChanged();
+        try { await Api.ScaleK8sDeploymentAsync(_selectedNs, _scaleName, _scaleReplicas, _context); Snackbar.Add($"Scaled '{_scaleName}' to {_scaleReplicas}.", Severity.Success); _scaleShow = false; await LoadDetailAsync(CancellationToken.None); }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        finally { _busy = false; StateHasChanged(); }
+    }
+
+    private async Task DeletePodAsync(string pod)
+    {
+        if (_selectedNs is null) return;
+        var ok = await DialogService.ShowMessageBoxAsync(title: "Delete pod",
+            markupMessage: new MarkupString($"Delete pod <strong>{pod}</strong>? Its controller will reschedule a replacement."),
+            yesText: "Delete", noText: null!, cancelText: "Cancel");
+        if (ok != true) return;
+        _busy = true; StateHasChanged();
+        try { await Api.DeleteK8sPodAsync(_selectedNs, pod, _context); Snackbar.Add($"Deleted pod '{pod}'.", Severity.Warning); await LoadDetailAsync(CancellationToken.None); }
+        catch (Exception ex) { Snackbar.Add(ex.Message, Severity.Error); }
+        finally { _busy = false; StateHasChanged(); }
     }
 
     private void ToggleAuto()

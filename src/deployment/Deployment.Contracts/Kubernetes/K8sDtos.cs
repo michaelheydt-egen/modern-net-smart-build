@@ -41,3 +41,6 @@ public sealed record K8sIngressDto(
 
 /// <summary>A snapshot (tail) of a pod's logs.</summary>
 public sealed record PodLogDto(string Pod, string? Container, string Log);
+
+/// <summary>Set a Deployment's replica count.</summary>
+public sealed record ScaleDeploymentRequest(int Replicas);
