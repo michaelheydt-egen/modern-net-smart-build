@@ -49,6 +49,8 @@ public sealed class DeploymentRun : AggregateRoot<Guid>
     public string? RolloutGreenSlot { get; private set; }
     /// <summary>The currently-live slot the Service still points at (e.g. <c>blue</c>).</summary>
     public string? RolloutActiveSlot { get; private set; }
+    /// <summary>Canary only: the traffic weight (%) the canary Ingress is currently routing to the new slot.</summary>
+    public int? RolloutCanaryWeight { get; private set; }
     /// <summary>Who promoted or rolled back the parked rollout.</summary>
     public string? DecisionBy { get; private set; }
 
@@ -139,12 +141,20 @@ public sealed class DeploymentRun : AggregateRoot<Guid>
 
     /// <summary>Blue-green (manual promotion): green is deployed + healthy but the Service still points at
     /// the active slot. Parks the run until a human promotes or rolls back. Terminal states are guarded.</summary>
-    public void AwaitPromotion(string greenSlot, string activeSlot, DateTimeOffset occurredAtUtc)
+    public void AwaitPromotion(string greenSlot, string activeSlot, DateTimeOffset occurredAtUtc, int? canaryWeight = null)
     {
         if (Status is DeploymentRunStatus.Succeeded or DeploymentRunStatus.Failed or DeploymentRunStatus.RolledBack) return;
         Status = DeploymentRunStatus.AwaitingPromotion;
         RolloutGreenSlot = string.IsNullOrWhiteSpace(greenSlot) ? null : greenSlot.Trim();
         RolloutActiveSlot = string.IsNullOrWhiteSpace(activeSlot) ? null : activeSlot.Trim();
+        RolloutCanaryWeight = canaryWeight;
+    }
+
+    /// <summary>Canary progressive ramp: record a new traffic weight while staying parked in AwaitingPromotion.</summary>
+    public void AdvanceCanary(int weight)
+    {
+        if (Status != DeploymentRunStatus.AwaitingPromotion) return;
+        RolloutCanaryWeight = weight;
     }
 
     /// <summary>Promote a parked rollout — the caller has already swapped the Service selector to green.</summary>

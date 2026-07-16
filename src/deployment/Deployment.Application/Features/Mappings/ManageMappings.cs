@@ -15,7 +15,7 @@ internal static class MappingConvert
     public static KubernetesSpec? ToDomain(this KubernetesSpecDto? k) =>
         k is null ? null : new KubernetesSpec(k.DeploymentName, k.ContainerPort, k.Replicas,
             k.EnvVars ?? new Dictionary<string, string>(), k.ImagePullSecret, k.CreateService,
-            (RolloutStrategy)(int)k.Strategy, (PromotionMode)(int)k.PromotionMode, k.CanaryWeightPercent);
+            (RolloutStrategy)(int)k.Strategy, (PromotionMode)(int)k.PromotionMode, k.CanaryWeightPercent, k.CanarySteps);
 
     public const string TargetMessage = "Provide a CloudRunServiceName (Cloud Run environment) or a Kubernetes spec (Kubernetes environment).";
     public static bool HasTarget(string? cloudRun, KubernetesSpecDto? k) => !string.IsNullOrWhiteSpace(cloudRun) || k is not null;

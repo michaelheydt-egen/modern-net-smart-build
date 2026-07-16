@@ -88,7 +88,7 @@ internal sealed class EfMappingReader : IMappingReader
                 m.Id, m.ServiceId, svcNames.GetValueOrDefault(m.ServiceId, ""),
                 m.EnvironmentId, envNames.GetValueOrDefault(m.EnvironmentId, ""),
                 m.CloudRunServiceName,
-                m.Kubernetes == null ? null : new KubernetesSpecDto(m.Kubernetes.DeploymentName, m.Kubernetes.ContainerPort, m.Kubernetes.Replicas, m.Kubernetes.EnvVars, m.Kubernetes.ImagePullSecret, m.Kubernetes.CreateService, (RolloutStrategyDto)(int)m.Kubernetes.Strategy, (PromotionModeDto)(int)m.Kubernetes.PromotionMode, m.Kubernetes.CanaryWeightPercent),
+                m.Kubernetes == null ? null : new KubernetesSpecDto(m.Kubernetes.DeploymentName, m.Kubernetes.ContainerPort, m.Kubernetes.Replicas, m.Kubernetes.EnvVars, m.Kubernetes.ImagePullSecret, m.Kubernetes.CreateService, (RolloutStrategyDto)(int)m.Kubernetes.Strategy, (PromotionModeDto)(int)m.Kubernetes.PromotionMode, m.Kubernetes.CanaryWeightPercent, m.Kubernetes.CanarySteps),
                 m.AutoDeploy,
                 m.Steps.Select(s => new DeploymentStepDto(s.Order, (DeploymentStepKindDto)(int)s.Kind)).ToList(),
                 m.CreatedAtUtc, m.UpdatedAtUtc))
@@ -123,7 +123,7 @@ internal sealed class EfRunReader : IRunReader
         (DeploymentTriggerDto)(int)r.Trigger, r.TriggeredBy, (DeploymentRunStatusDto)(int)r.Status,
         r.RemoteImageRef, r.CloudRunRevision, r.KubernetesResource, r.FailureReason,
         r.Steps.Select(s => new RunStepResultDto(s.Order, s.Kind.ToString(), s.Status, s.Detail, s.FailureKind?.ToString())).ToList(),
-        r.RequestedAtUtc, r.CompletedAtUtc, r.RolloutGreenSlot, r.RolloutActiveSlot, r.DecisionBy);
+        r.RequestedAtUtc, r.CompletedAtUtc, r.RolloutGreenSlot, r.RolloutActiveSlot, r.DecisionBy, r.RolloutCanaryWeight);
 }
 
 internal sealed class EfAspireApplicationReader : IAspireApplicationReader

@@ -16,7 +16,8 @@ public sealed record KubernetesSpecDto(
     string DeploymentName, int ContainerPort, int Replicas,
     IReadOnlyDictionary<string, string>? EnvVars, string? ImagePullSecret, bool CreateService,
     RolloutStrategyDto Strategy = RolloutStrategyDto.Direct, PromotionModeDto PromotionMode = PromotionModeDto.Automatic,
-    int CanaryWeightPercent = 20);
+    int CanaryWeightPercent = 20,
+    IReadOnlyList<int>? CanarySteps = null);
 
 public sealed record DeploymentMappingDto(
     Guid Id,

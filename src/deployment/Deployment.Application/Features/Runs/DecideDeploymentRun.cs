@@ -32,10 +32,26 @@ public sealed class PromoteDeploymentRunHandler
         if (run.Status != DeploymentRunStatus.AwaitingPromotion) return new DeploymentRunDecisionResult(false, "run-not-awaiting-promotion");
         if (!RolloutTarget.TryResolve(run, out var t)) return new DeploymentRunDecisionResult(false, "run-missing-rollout-context");
 
+        // Canary progressive ramp: if there's a higher step in the ladder, bump the traffic weight and stay
+        // parked; only the final "promote" (no higher step) cuts over to 100%.
         if (t.Strategy == Domain.Mappings.RolloutStrategy.Canary)
+        {
+            var current = run.RolloutCanaryWeight ?? t.CanarySteps[0];
+            var next = t.CanarySteps.FirstOrDefault(s => s > current);
+            if (next > 0)
+            {
+                await _rollout.SetCanaryWeightAsync(t.Context, t.Namespace, t.Name, next, ct).ConfigureAwait(false);
+                run.AdvanceCanary(next);
+                await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
+                _logger.LogInformation("[deploy] Run {Run} canary advanced {From}% -> {To}% by {By}.", run.Id, current, next, cmd.PromotedBy);
+                return new DeploymentRunDecisionResult(true, $"advanced-to-{next}");
+            }
             await _rollout.PromoteCanaryAsync(t.Context, t.Namespace, t.Name, t.GreenSlot, t.ActiveSlot, t.Replicas, ct).ConfigureAwait(false);
+        }
         else
+        {
             await _rollout.PromoteBlueGreenAsync(t.Context, t.Namespace, t.Name, t.GreenSlot, t.ActiveSlot, ct).ConfigureAwait(false);
+        }
         run.SetKubernetesResource($"service/{t.Name} -> deployment/{t.Name}-{t.GreenSlot}");
         var now = _clock.GetUtcNow();
         run.PromoteRollout(cmd.PromotedBy ?? "unknown", now);
@@ -65,7 +81,10 @@ public sealed class RollbackDeploymentRunHandler
         if (run.Status != DeploymentRunStatus.AwaitingPromotion) return new DeploymentRunDecisionResult(false, "run-not-awaiting-promotion");
         if (!RolloutTarget.TryResolve(run, out var t)) return new DeploymentRunDecisionResult(false, "run-missing-rollout-context");
 
-        await _rollout.RollbackAsync(t.Context, t.Namespace, t.Name, t.GreenSlot, ct).ConfigureAwait(false);
+        if (t.Strategy == Domain.Mappings.RolloutStrategy.Canary)
+            await _rollout.RollbackCanaryAsync(t.Context, t.Namespace, t.Name, t.GreenSlot, ct).ConfigureAwait(false);
+        else
+            await _rollout.RollbackAsync(t.Context, t.Namespace, t.Name, t.GreenSlot, ct).ConfigureAwait(false);
         var now = _clock.GetUtcNow();
         run.RollbackRollout(cmd.RolledBackBy ?? "unknown", cmd.Reason, now);
         await _uow.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -78,7 +97,7 @@ public sealed class RollbackDeploymentRunHandler
 /// <summary>The resolved rollout target for a parked run (coordinates, the two slots, strategy + replicas).</summary>
 internal readonly record struct RolloutTarget(
     string Context, string Namespace, string Name, string GreenSlot, string ActiveSlot,
-    Domain.Mappings.RolloutStrategy Strategy, int Replicas)
+    Domain.Mappings.RolloutStrategy Strategy, int Replicas, IReadOnlyList<int> CanarySteps)
 {
     public static bool TryResolve(DeploymentRun run, out RolloutTarget target)
     {
@@ -91,7 +110,8 @@ internal readonly record struct RolloutTarget(
 
         var strategy = run.KubernetesSpec?.Strategy ?? Domain.Mappings.RolloutStrategy.BlueGreen;
         var replicas = run.KubernetesSpec?.Replicas ?? 1;
-        target = new RolloutTarget(run.KubernetesContext!, run.KubernetesNamespace!, name, run.RolloutGreenSlot!, run.RolloutActiveSlot!, strategy, replicas);
+        var steps = run.KubernetesSpec?.NormalizedCanarySteps() ?? new List<int> { 20 };
+        target = new RolloutTarget(run.KubernetesContext!, run.KubernetesNamespace!, name, run.RolloutGreenSlot!, run.RolloutActiveSlot!, strategy, replicas, steps);
         return true;
     }
 

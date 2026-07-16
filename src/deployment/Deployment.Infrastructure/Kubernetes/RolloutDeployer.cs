@@ -79,40 +79,67 @@ internal sealed class RolloutDeployer : IRolloutDeployer
             await EnsureNamespaceAsync(client, req.Namespace, ct).ConfigureAwait(false);
 
             var stable = await ResolveAnnotationSlotAsync(client, req.Namespace, req.Name, ct).ConfigureAwait(false);
+            var full = Math.Max(1, req.Replicas);
 
-            // Bootstrap: deploy the first slot at full replicas + a Service that selects the whole app.
+            // Bootstrap: deploy the first slot at full replicas; the stable Service selects only that slot and a
+            // primary Ingress makes it reachable — later canaries attach a weighted Ingress to the same host.
             if (stable is null)
             {
-                await ApplyDeploymentAsync(client, req, Blue, Math.Max(1, req.Replicas), ct).ConfigureAwait(false);
-                await ApplyServiceAsync(client, req, selectorSlot: null, activeSlot: Blue, ct).ConfigureAwait(false);
+                await ApplyDeploymentAsync(client, req, Blue, full, ct).ConfigureAwait(false);
+                await ApplyServiceAsync(client, req, selectorSlot: Blue, activeSlot: Blue, ct).ConfigureAwait(false);
+                await ApplyPrimaryIngressAsync(client, req, ct).ConfigureAwait(false);
                 var ok = await HealthGateAsync(client, req, Blue, ct).ConfigureAwait(false);
                 return new RolloutDeployResult(Blue, Blue, ok, $"deployment/{SlotName(req.Name, Blue)} ({(ok ? "healthy" : "unhealthy")})");
             }
 
             var canary = Other(stable);
-            var full = Math.Max(1, req.Replicas);
-            var weight = Math.Clamp(req.CanaryWeightPercent <= 0 ? 20 : req.CanaryWeightPercent, 1, 100);
-            var canaryReplicas = Math.Max(1, (int)Math.Ceiling(full * weight / 100.0));
+            var weight = Math.Clamp(req.CanaryWeightPercent <= 0 ? 20 : req.CanaryWeightPercent, 1, 99);
 
-            await ApplyDeploymentAsync(client, req, canary, canaryReplicas, ct).ConfigureAwait(false);
-            var healthy = await HealthGateAsync(client, req, canary, ct, canaryReplicas).ConfigureAwait(false);
-            _logger.LogInformation("[k8s] canary {Name} slot={Slot} ({Rep}/{Full} ~{Weight}%) stable={Stable} healthy={Healthy}.",
-                req.Name, canary, canaryReplicas, full, weight, stable, healthy);
-            return new RolloutDeployResult(canary, stable, healthy, $"deployment/{SlotName(req.Name, canary)} ({canaryReplicas}/{full} replicas, {(healthy ? "healthy" : "unhealthy")})");
+            // Canary runs at FULL replicas; the split is real traffic weighting via the canary Ingress, not
+            // an approximation by replica count.
+            await ApplyDeploymentAsync(client, req, canary, full, ct).ConfigureAwait(false);
+            await ApplyCanaryServiceAsync(client, req, canary, ct).ConfigureAwait(false);
+            await ApplyPrimaryIngressAsync(client, req, ct).ConfigureAwait(false); // ensure the primary exists to attach to
+            await ApplyCanaryIngressAsync(client, req, weight, ct).ConfigureAwait(false);
+            var healthy = await HealthGateAsync(client, req, canary, ct).ConfigureAwait(false);
+            _logger.LogInformation("[k8s] canary {Name} slot={Slot} weight={Weight}% stable={Stable} healthy={Healthy}.",
+                req.Name, canary, weight, stable, healthy);
+            return new RolloutDeployResult(canary, stable, healthy, $"deployment/{SlotName(req.Name, canary)} (canary {weight}% traffic, {(healthy ? "healthy" : "unhealthy")})");
         }
         catch (Exception ex) { throw Wrap(ex, "canary deploy"); }
+    }
+
+    public async Task SetCanaryWeightAsync(string context, string ns, string name, int weight, CancellationToken ct = default)
+    {
+        using var client = _factory.Create(context);
+        var w = Math.Clamp(weight, 1, 99);
+        await client.NetworkingV1.PatchNamespacedIngressAsync(
+            MergePatch($"{{\"metadata\":{{\"annotations\":{{\"nginx.ingress.kubernetes.io/canary-weight\":\"{w}\"}}}}}}"),
+            CanaryName(name), ns, cancellationToken: ct).ConfigureAwait(false);
+        _logger.LogInformation("[k8s] canary {Name} weight -> {Weight}%.", name, w);
     }
 
     public async Task<string> PromoteCanaryAsync(string context, string ns, string name, string newSlot, string oldSlot, int fullReplicas, CancellationToken ct = default)
     {
         using var client = _factory.Create(context);
-        // Scale the canary to full, retire the stable slot, and record the new active slot on the Service.
-        await ScaleAsync(client, ns, SlotName(name, newSlot), Math.Max(1, fullReplicas), ct).ConfigureAwait(false);
-        await RetireSlotAsync(client, ns, name, oldSlot, newSlot, ct).ConfigureAwait(false);
+        // Cut over: repoint the stable Service at the canary slot, drop the canary Ingress + Service, retire old.
         await client.CoreV1.PatchNamespacedServiceAsync(
-            MergePatch($"{{\"metadata\":{{\"annotations\":{{\"{ActiveSlotAnnotation}\":\"{newSlot}\"}}}}}}"), name, ns, cancellationToken: ct).ConfigureAwait(false);
-        _logger.LogInformation("[k8s] canary promote {Name} -> slot={Slot} at {Full} (retired {Old}).", name, newSlot, fullReplicas, oldSlot);
-        return $"service/{name} -> deployment/{SlotName(name, newSlot)} (full)";
+            MergePatch($"{{\"metadata\":{{\"annotations\":{{\"{ActiveSlotAnnotation}\":\"{newSlot}\"}}}},\"spec\":{{\"selector\":{{\"app\":\"{name}\",\"slot\":\"{newSlot}\"}}}}}}"),
+            name, ns, cancellationToken: ct).ConfigureAwait(false);
+        await IgnoreNotFoundAsync(() => client.NetworkingV1.DeleteNamespacedIngressAsync(CanaryName(name), ns, cancellationToken: ct)).ConfigureAwait(false);
+        await IgnoreNotFoundAsync(() => client.CoreV1.DeleteNamespacedServiceAsync(CanaryName(name), ns, cancellationToken: ct)).ConfigureAwait(false);
+        await RetireSlotAsync(client, ns, name, oldSlot, newSlot, ct).ConfigureAwait(false);
+        _logger.LogInformation("[k8s] canary promote {Name} -> slot={Slot} (retired {Old}).", name, newSlot, oldSlot);
+        return $"service/{name} -> deployment/{SlotName(name, newSlot)} (100%)";
+    }
+
+    public async Task RollbackCanaryAsync(string context, string ns, string name, string canarySlot, CancellationToken ct = default)
+    {
+        using var client = _factory.Create(context);
+        await IgnoreNotFoundAsync(() => client.NetworkingV1.DeleteNamespacedIngressAsync(CanaryName(name), ns, cancellationToken: ct)).ConfigureAwait(false);
+        await IgnoreNotFoundAsync(() => client.CoreV1.DeleteNamespacedServiceAsync(CanaryName(name), ns, cancellationToken: ct)).ConfigureAwait(false);
+        await IgnoreNotFoundAsync(() => client.AppsV1.DeleteNamespacedDeploymentAsync(SlotName(name, canarySlot), ns, cancellationToken: ct)).ConfigureAwait(false);
+        _logger.LogInformation("[k8s] canary rollback {Name}: dropped canary ingress/service/deployment (slot={Slot}).", name, canarySlot);
     }
 
     // ==================== Shared ====================
@@ -155,6 +182,83 @@ internal sealed class RolloutDeployer : IRolloutDeployer
                 Ports = new List<V1ServicePort> { new() { Port = req.ContainerPort, TargetPort = req.ContainerPort } },
             },
         }), req.Name, req.Namespace, fieldManager: FieldManager, force: true, cancellationToken: ct).ConfigureAwait(false);
+    }
+
+    private static async Task ApplyCanaryServiceAsync(IKubernetes client, RolloutDeployRequest req, string canarySlot, CancellationToken ct) =>
+        await client.CoreV1.PatchNamespacedServiceAsync(Apply(new V1Service
+        {
+            ApiVersion = "v1", Kind = "Service",
+            Metadata = new V1ObjectMeta
+            {
+                Name = CanaryName(req.Name), NamespaceProperty = req.Namespace,
+                Labels = new Dictionary<string, string> { ["app"] = req.Name },
+            },
+            Spec = new V1ServiceSpec
+            {
+                Selector = new Dictionary<string, string> { ["app"] = req.Name, ["slot"] = canarySlot },
+                Ports = new List<V1ServicePort> { new() { Port = req.ContainerPort, TargetPort = req.ContainerPort } },
+            },
+        }), CanaryName(req.Name), req.Namespace, fieldManager: FieldManager, force: true, cancellationToken: ct).ConfigureAwait(false);
+
+    private Task ApplyPrimaryIngressAsync(IKubernetes client, RolloutDeployRequest req, CancellationToken ct) =>
+        client.NetworkingV1.PatchNamespacedIngressAsync(
+            Apply(BuildIngress(req, req.Name, service: req.Name, canaryWeight: null)),
+            req.Name, req.Namespace, fieldManager: FieldManager, force: true, cancellationToken: ct);
+
+    private Task ApplyCanaryIngressAsync(IKubernetes client, RolloutDeployRequest req, int weight, CancellationToken ct) =>
+        client.NetworkingV1.PatchNamespacedIngressAsync(
+            Apply(BuildIngress(req, CanaryName(req.Name), service: CanaryName(req.Name), canaryWeight: weight)),
+            CanaryName(req.Name), req.Namespace, fieldManager: FieldManager, force: true, cancellationToken: ct);
+
+    private V1Ingress BuildIngress(RolloutDeployRequest req, string ingressName, string service, int? canaryWeight)
+    {
+        var host = $"{req.Name}.{_options.CurrentValue.AppIngressDomain}";
+        var annotations = canaryWeight is { } w
+            ? new Dictionary<string, string>
+            {
+                ["nginx.ingress.kubernetes.io/canary"] = "true",
+                ["nginx.ingress.kubernetes.io/canary-weight"] = w.ToString(),
+            }
+            : null;
+        return new V1Ingress
+        {
+            ApiVersion = "networking.k8s.io/v1", Kind = "Ingress",
+            Metadata = new V1ObjectMeta
+            {
+                Name = ingressName, NamespaceProperty = req.Namespace,
+                Labels = new Dictionary<string, string> { ["app"] = req.Name },
+                Annotations = annotations,
+            },
+            Spec = new V1IngressSpec
+            {
+                IngressClassName = _options.CurrentValue.IngressClassName,
+                Rules = new List<V1IngressRule>
+                {
+                    new()
+                    {
+                        Host = host,
+                        Http = new V1HTTPIngressRuleValue
+                        {
+                            Paths = new List<V1HTTPIngressPath>
+                            {
+                                new()
+                                {
+                                    Path = "/", PathType = "Prefix",
+                                    Backend = new V1IngressBackend
+                                    {
+                                        Service = new V1IngressServiceBackend
+                                        {
+                                            Name = service,
+                                            Port = new V1ServiceBackendPort { Number = req.ContainerPort },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        };
     }
 
     private async Task RetireSlotAsync(IKubernetes client, string ns, string name, string oldSlot, string newSlot, CancellationToken ct)
@@ -254,6 +358,7 @@ internal sealed class RolloutDeployer : IRolloutDeployer
     }
 
     private static string SlotName(string name, string slot) => $"{name}-{slot}";
+    private static string CanaryName(string name) => $"{name}-canary";
     private static string Other(string? slot) => slot == Blue ? Green : Blue;
     private static V1Patch Apply(object body) => new(body, V1Patch.PatchType.ApplyPatch);
     private static V1Patch MergePatch(string json) => new(json, V1Patch.PatchType.MergePatch);

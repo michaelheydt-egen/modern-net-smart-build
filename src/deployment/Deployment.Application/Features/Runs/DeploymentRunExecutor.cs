@@ -64,6 +64,7 @@ public sealed class DeploymentRunExecutor
         Deployment.Domain.Mappings.DeploymentStepKind? failedStep = null;
         var paused = false;
         string? pausedGreenSlot = null, pausedActiveSlot = null;
+        int? pausedCanaryWeight = null;
 
         foreach (var step in steps.OrderBy(s => s.Order))
         {
@@ -84,6 +85,7 @@ public sealed class DeploymentRunExecutor
                     paused = true;
                     pausedGreenSlot = outcome.GreenSlot;
                     pausedActiveSlot = outcome.ActiveSlot;
+                    pausedCanaryWeight = outcome.CanaryWeight;
                     break;
                 }
 
@@ -124,7 +126,7 @@ public sealed class DeploymentRunExecutor
         if (ctx.KubernetesResource is { Length: > 0 }) run.SetKubernetesResource(ctx.KubernetesResource);
 
         var now = clock.GetUtcNow();
-        if (paused) run.AwaitPromotion(pausedGreenSlot ?? "green", pausedActiveSlot ?? "blue", now);
+        if (paused) run.AwaitPromotion(pausedGreenSlot ?? "green", pausedActiveSlot ?? "blue", now, pausedCanaryWeight);
         else if (failed) run.Fail(failReason ?? "Deployment failed.", now, failedStep?.ToString(), failureKind?.ToString());
         else run.Succeed(now);
 

@@ -108,8 +108,9 @@ internal sealed class KubernetesApplyStepExecutor : IDeploymentStepExecutor
     private async Task<StepOutcome> RolloutAsync(DeploymentContext ctx, KubernetesSpec spec, string name, int port, CancellationToken ct)
     {
         var canary = spec.Strategy == RolloutStrategy.Canary;
+        var initialWeight = canary ? spec.NormalizedCanarySteps()[0] : 0;
         var req = new RolloutDeployRequest(ctx.KubernetesContext!, ctx.KubernetesNamespace!, name, ctx.ImageToDeploy,
-            port, spec.Replicas, spec.EnvVars, spec.ImagePullSecret, spec.CanaryWeightPercent);
+            port, spec.Replicas, spec.EnvVars, spec.ImagePullSecret, initialWeight);
 
         var result = canary
             ? await _rollout.DeployCanaryAsync(req, ct).ConfigureAwait(false)
@@ -123,7 +124,8 @@ internal sealed class KubernetesApplyStepExecutor : IDeploymentStepExecutor
         var kindLabel = canary ? "canary" : "green";
         if (!result.Healthy)
         {
-            await _rollout.RollbackAsync(ctx.KubernetesContext!, ctx.KubernetesNamespace!, name, result.NewSlot, ct).ConfigureAwait(false);
+            if (canary) await _rollout.RollbackCanaryAsync(ctx.KubernetesContext!, ctx.KubernetesNamespace!, name, result.NewSlot, ct).ConfigureAwait(false);
+            else await _rollout.RollbackAsync(ctx.KubernetesContext!, ctx.KubernetesNamespace!, name, result.NewSlot, ct).ConfigureAwait(false);
             return StepOutcome.Fail($"{kindLabel} slot '{result.NewSlot}' did not become healthy — rolled back.", StepFailureKind.Timeout);
         }
 
@@ -136,9 +138,12 @@ internal sealed class KubernetesApplyStepExecutor : IDeploymentStepExecutor
             return StepOutcome.Ok($"promoted {name} to '{result.NewSlot}'");
         }
 
-        // Manual promotion → park the run in AwaitingPromotion.
+        // Manual promotion → park the run in AwaitingPromotion (canary carries its current traffic weight).
         return StepOutcome.PausedForPromotion(result.NewSlot, result.ActiveSlot,
-            $"{kindLabel} '{result.NewSlot}' healthy; awaiting promotion (active '{result.ActiveSlot}').");
+            canary
+                ? $"canary '{result.NewSlot}' healthy at {initialWeight}% traffic; awaiting promotion (stable '{result.ActiveSlot}')."
+                : $"green '{result.NewSlot}' healthy; awaiting promotion (active '{result.ActiveSlot}').",
+            canary ? initialWeight : (int?)null);
     }
 
     private static string LeafName(string containerName)

@@ -29,7 +29,8 @@ public sealed record DeploymentRunDto(
     DateTimeOffset? CompletedAtUtc,
     string? RolloutGreenSlot = null,
     string? RolloutActiveSlot = null,
-    string? DecisionBy = null);
+    string? DecisionBy = null,
+    int? RolloutCanaryWeight = null);
 
 /// <summary>Manually trigger a deployment for a mapping. Version optional — defaults to the latest known container.</summary>
 public sealed record TriggerDeploymentRequest(string? Version, string? TriggeredBy);

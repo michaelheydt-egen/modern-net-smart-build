@@ -58,17 +58,17 @@
             <MudSelect T="RolloutStrategyDto" @bind-Value="_form.K8sStrategy" Label="Rollout strategy" Class="mt-2">
                 <MudSelectItem Value="RolloutStrategyDto.Direct">Direct (rolling update in place)</MudSelectItem>
                 <MudSelectItem Value="RolloutStrategyDto.BlueGreen">Blue-green (deploy green, health-gate, cut over)</MudSelectItem>
-                <MudSelectItem Value="RolloutStrategyDto.Canary">Canary (weighted replicas, health-gate, then promote)</MudSelectItem>
+                <MudSelectItem Value="RolloutStrategyDto.Canary">Canary (ingress traffic-weighted, progressive ramp)</MudSelectItem>
             </MudSelect>
             @if (_form.K8sStrategy == RolloutStrategyDto.Canary)
             {
-                <MudNumericField @bind-Value="_form.K8sCanaryWeight" Label="Canary weight (%)" Min="1" Max="100" HelperText="the canary's share of replicas during the gate (~traffic %)" />
+                <MudTextField @bind-Value="_form.K8sCanarySteps" Label="Canary weight ladder (%)" HelperText="ascending traffic % the canary Ingress routes; Manual promotion advances through these, then cuts over to 100%. e.g. 10,25,50" />
             }
             @if (_form.K8sStrategy != RolloutStrategyDto.Direct)
             {
                 <MudSelect T="PromotionModeDto" @bind-Value="_form.K8sPromotionMode" Label="Promotion" HelperText="when to complete the rollout (cut over / scale canary to full)">
                     <MudSelectItem Value="PromotionModeDto.Automatic">Automatic (promote once healthy)</MudSelectItem>
-                    <MudSelectItem Value="PromotionModeDto.Manual">Manual (park for a human to promote)</MudSelectItem>
+                    <MudSelectItem Value="PromotionModeDto.Manual">Manual (park for a human to promote / ramp)</MudSelectItem>
                 </MudSelect>
             }
             <MudSwitch T="bool" @bind-Value="_form.AutoDeploy" Color="Color.Primary" Label="Auto-deploy on new container push" Class="mt-2" />
@@ -126,6 +126,14 @@
     private static bool IsK8s(EnvironmentDto e) => !string.IsNullOrEmpty(e.KubernetesContext) && !string.IsNullOrEmpty(e.KubernetesNamespace);
     private bool SelectedEnvIsK8s() => _envs?.FirstOrDefault(e => e.Id == _form.EnvironmentId) is { } e && IsK8s(e);
 
+    private static List<int> ParseCanarySteps(string? csv)
+    {
+        var steps = (csv ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(s => int.TryParse(s, out var n) ? n : -1)
+            .Where(n => n is > 0 and < 100).Distinct().OrderBy(n => n).ToList();
+        return steps.Count > 0 ? steps : new List<int> { 20 };
+    }
+
     private async Task SaveAsync()
     {
         _busy = true;
@@ -134,9 +142,10 @@
             CreateMappingRequest req;
             if (SelectedEnvIsK8s())
             {
+                var steps = ParseCanarySteps(_form.K8sCanarySteps);
                 var k8s = new KubernetesSpecDto(_form.K8sDeploymentName ?? "", _form.K8sPort, _form.K8sReplicas, null,
                     string.IsNullOrWhiteSpace(_form.K8sImagePullSecret) ? null : _form.K8sImagePullSecret, true,
-                    _form.K8sStrategy, _form.K8sPromotionMode, _form.K8sCanaryWeight);
+                    _form.K8sStrategy, _form.K8sPromotionMode, steps.FirstOrDefault(20), steps);
                 req = new CreateMappingRequest(_form.ServiceId, _form.EnvironmentId, null, k8s, _form.AutoDeploy, null);
             }
             else
@@ -186,6 +195,6 @@
         public string? K8sImagePullSecret { get; set; }
         public RolloutStrategyDto K8sStrategy { get; set; } = RolloutStrategyDto.Direct;
         public PromotionModeDto K8sPromotionMode { get; set; } = PromotionModeDto.Automatic;
-        public int K8sCanaryWeight { get; set; } = 20;
+        public string K8sCanarySteps { get; set; } = "20,50";
     }
 }

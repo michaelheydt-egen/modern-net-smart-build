@@ -24,7 +24,9 @@
                 <MudTd>
                     <MudChip T="string" Size="Size.Small" Color="@StatusColor(context.Status)" Variant="Variant.Filled">@context.Status</MudChip>
                     @if (context.Status == DeploymentRunStatusDto.AwaitingPromotion && !string.IsNullOrEmpty(context.RolloutGreenSlot))
-                    { <MudTooltip Text="@($"green '{context.RolloutGreenSlot}' healthy; live '{context.RolloutActiveSlot}'")"><MudIcon Icon="@Icons.Material.Filled.CompareArrows" Color="Color.Warning" Size="Size.Small" /></MudTooltip> }
+                    { <MudTooltip Text="@($"'{context.RolloutGreenSlot}' healthy; live '{context.RolloutActiveSlot}'")"><MudIcon Icon="@Icons.Material.Filled.CompareArrows" Color="Color.Warning" Size="Size.Small" /></MudTooltip> }
+                    @if (context.RolloutCanaryWeight is { } cw)
+                    { <MudTooltip Text="current canary traffic weight"><MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Warning">canary @cw%</MudChip></MudTooltip> }
                 </MudTd>
                 <MudTd>@context.ServiceName</MudTd>
                 <MudTd Style="font-family: ui-monospace, monospace; font-size:0.85em;">@context.Version</MudTd>
@@ -39,8 +41,8 @@
                 <MudTd>
                     @if (context.Status == DeploymentRunStatusDto.AwaitingPromotion)
                     {
-                        <MudTooltip Text="Promote — cut traffic to the green slot"><MudIconButton Icon="@Icons.Material.Filled.Check" Color="Color.Success" Size="Size.Small" Disabled="_busy" OnClick="@(() => PromoteAsync(context))" /></MudTooltip>
-                        <MudTooltip Text="Roll back — delete the green slot, keep blue live"><MudIconButton Icon="@Icons.Material.Filled.Undo" Color="Color.Error" Size="Size.Small" Disabled="_busy" OnClick="@(() => RollbackAsync(context))" /></MudTooltip>
+                        <MudTooltip Text="@(context.RolloutCanaryWeight is not null ? "Promote — ramp the canary to the next weight, or cut over to 100% at the last step" : "Promote — cut traffic to the green slot")"><MudIconButton Icon="@Icons.Material.Filled.Check" Color="Color.Success" Size="Size.Small" Disabled="_busy" OnClick="@(() => PromoteAsync(context))" /></MudTooltip>
+                        <MudTooltip Text="Roll back — delete the new slot, keep the live one"><MudIconButton Icon="@Icons.Material.Filled.Undo" Color="Color.Error" Size="Size.Small" Disabled="_busy" OnClick="@(() => RollbackAsync(context))" /></MudTooltip>
                     }
                 </MudTd>
             </RowTemplate>

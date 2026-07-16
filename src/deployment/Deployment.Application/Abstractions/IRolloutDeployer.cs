@@ -1,7 +1,7 @@
 namespace Deployment.Application.Abstractions;
 
-/// <summary>Inputs for a slot deploy (blue-green or canary). <see cref="CanaryWeightPercent"/> is the
-/// canary's share of replicas during the gate (canary only; ignored by blue-green).</summary>
+/// <summary>Inputs for a slot deploy (blue-green or canary). <see cref="CanaryWeightPercent"/> is the initial
+/// canary Ingress traffic weight (canary only; ignored by blue-green).</summary>
 public sealed record RolloutDeployRequest(
     string Context, string Namespace, string Name, string Image, int ContainerPort, int Replicas,
     IReadOnlyDictionary<string, string> EnvVars, string? ImagePullSecret, int CanaryWeightPercent = 0);
@@ -28,16 +28,24 @@ public interface IRolloutDeployer
     /// <paramref name="oldSlot"/> (scale to zero).</summary>
     Task<string> PromoteBlueGreenAsync(string context, string @namespace, string name, string newSlot, string oldSlot, CancellationToken cancellationToken = default);
 
-    // ---- Canary ----
-    /// <summary>Deploy the canary slot at a fraction of the replicas (per the request's weight) behind a
-    /// Service that selects the whole app, so it takes proportional traffic; then health-gate it.</summary>
+    // ---- Canary (ingress-weighted) ----
+    /// <summary>Deploy the canary slot at full replicas behind its own Service, and stamp an ingress-nginx
+    /// canary Ingress routing <see cref="RolloutDeployRequest.CanaryWeightPercent"/>% of real traffic to it
+    /// (the stable Service keeps the rest); then health-gate the canary.</summary>
     Task<RolloutDeployResult> DeployCanaryAsync(RolloutDeployRequest request, CancellationToken cancellationToken = default);
 
-    /// <summary>Complete a canary: scale <paramref name="newSlot"/> to <paramref name="fullReplicas"/>, retire
-    /// <paramref name="oldSlot"/> (scale to zero), and record the new slot as active.</summary>
+    /// <summary>Progressive ramp: set the canary Ingress traffic weight (%) to <paramref name="weight"/>.</summary>
+    Task SetCanaryWeightAsync(string context, string @namespace, string name, int weight, CancellationToken cancellationToken = default);
+
+    /// <summary>Complete a canary: repoint the stable Service at <paramref name="newSlot"/>, delete the canary
+    /// Ingress + canary Service, and retire <paramref name="oldSlot"/>. <paramref name="fullReplicas"/> is unused
+    /// (the canary already runs at full) — kept for signature compatibility.</summary>
     Task<string> PromoteCanaryAsync(string context, string @namespace, string name, string newSlot, string oldSlot, int fullReplicas, CancellationToken cancellationToken = default);
 
+    /// <summary>Roll a canary back: delete the canary Deployment + its Service + the canary Ingress. Stable stays live.</summary>
+    Task RollbackCanaryAsync(string context, string @namespace, string name, string canarySlot, CancellationToken cancellationToken = default);
+
     // ---- Shared ----
-    /// <summary>Roll back: delete the new-slot Deployment (green or canary). The active slot stays live.</summary>
+    /// <summary>Roll back a blue-green green slot: delete the new-slot Deployment. The active slot stays live.</summary>
     Task RollbackAsync(string context, string @namespace, string name, string newSlot, CancellationToken cancellationToken = default);
 }
