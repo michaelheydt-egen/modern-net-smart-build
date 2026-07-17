@@ -286,9 +286,17 @@ per-mapping auto-deploy — one model across clouds and clusters.*
 *A whole .NET Aspire app deployed to Kubernetes — every workload pinned to a digest-tagged image
 promoted from Nexus, with the manifest source and full deploy log. Every deploy traces to a commit.*
 
-### Supply-chain provenance — SBOMs
+### SBOM visualizer — the dependency graph
 
-![Per-image CycloneDX SBOMs with digest-pinned BOM references](docs/screenshots/sbom-provenance.png)
+![Interactive CycloneDX dependency graph for an Aspire image, vulnerable nodes highlighted](docs/screenshots/sbom-visualizer.png)
 
-*Per-image CycloneDX SBOMs (spec 1.7) from the `cicd-aspire-publish` Trivy scan — each pinned to an
-image digest and stored as provenance in Nexus, alongside the build's `FAIL_ON_SEVERITY` CVE gate.*
+*Every image gets a per-CycloneDX SBOM from the `cicd-aspire-publish` Trivy scan, rendered as an
+interactive dependency graph — here 129 components and 238 edges, with the 20 vulnerable nodes flagged.*
+
+### Vulnerabilities — CVEs by severity
+
+![CVE inventory for the same image: severity-ranked table with affected packages and sources](docs/screenshots/vulnerabilities.png)
+
+*The same scan's CVE inventory — severity-ranked (2 critical · 4 high · 9 medium · 2 low), each with
+the affected package, source advisory, and a link out. This is exactly what the build's
+`FAIL_ON_SEVERITY` gate acts on before anything publishes.*
